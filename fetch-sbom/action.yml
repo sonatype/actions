@@ -27,6 +27,7 @@ inputs:
   artifact-name:
     description: 'The name of the artifact to be uploaded'
     required: false
+    default: 'sbom-document'
   push-dependency-graph:
     description: 'A true value will push SBOM information to the GitHub dependency graph feature.'
     required: false
