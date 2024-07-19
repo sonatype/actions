@@ -1,0 +1,50 @@
+name: 'Fetch SBOM'
+description: 'fetch-sbom action gets the project SBOM and uploads it as an artifact'
+author: 'Sonatype'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  scan-id:
+    description: 'The scan ID to fetch the report'
+    required: true
+  application-id:
+    description: 'The IQ Server application ID'
+    required: true
+  sbom-standard:
+    description: 'The SBOM standard (spdx or cycloneDx)'
+    required: true
+  sbom-format:
+    description: 'The output file format (json or xml)'
+    required: false
+    default: 'json'
+  sbom-version:
+    description:
+      'The version of the SBOM (- Available CycloneDX Versions: 1.2, 1.3, 1.4, 1.5 - Available SPDX version: 2.3)'
+    required: true
+  artifact-name:
+    description: 'The name of the artifact to be uploaded'
+    required: false
+  push-dependency-graph:
+    description: 'A true value will push SBOM information to the GitHub dependency graph feature.'
+    required: false
+    default: false
+  iq-server-url:
+    description: 'The location of your Lifecycle server (e.g. http://localhost:8070).'
+    required: true
+  username:
+    description: 'The username/usercode to authenticate with IQ Server'
+    required: true
+  password:
+    description: 'Password/passcode to authenticate with IQ Server'
+    required: true
+  token:
+    description: 'GitHub Personal Access Token (PAT). Defaults to PAT provided by Actions runner.'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: node20
+  main: dist/index.js
