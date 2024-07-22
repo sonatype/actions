@@ -1,0 +1,97 @@
+name: 'Run IQ CLI'
+description:
+  'run-iq-cli action runs IQ CLI (jar) with the set of parameters provided and outputs the scan id and the report URL'
+author: 'Sonatype'
+
+# Add your action's branding here. This will appear on the GitHub Marketplace.
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+# Define your inputs here.
+inputs:
+  username:
+    description: 'The username to authenticate with IQ Server'
+    required: true
+  password:
+    description: 'The password to authenticate with IQ Server'
+    required: true
+  application-id:
+    description: 'The IQ Server application ID'
+    required: true
+  organization-id:
+    description: 'The ID for the organization to which the application belongs.'
+    required: false
+  iq-server-url:
+    description: 'The location of your Lifecycle server (e.g. http://localhost:8070).'
+    required: true
+
+  scan-targets:
+    description: 'Paths to specific files, directories, or docker images.'
+    required: true
+
+  stage:
+    description: 'Specify the development lifecycle stage for the analysis.'
+    required: false
+    default: 'build'
+  result-file:
+    description: 'Will upload the result file as an action artifact.'
+    required: false
+  module-exclude:
+    description:
+      'Specify module files to ignore via Apache Ant-styled patterns. Repeat the option for multiple specifications.'
+    required: false
+  fail-on-policy-warnings:
+    description: 'Causes a failure of the evaluation if any warnings are encountered.'
+    required: false
+    default: false
+  ignore-system-errors:
+    description:
+      'Ignore system errors (e.g. IO, Network, server, etc.) when running on continuous integration servers to avoid
+      unintentional build failures.'
+    required: false
+    default: false
+  ignore-scanning-errors:
+    description:
+      'Ignore scanning errors (e.g. invalid files, inaccessible files, etc) when the code base contains invalid files
+      for testing purposes. Scanning these files may cause unintentional build failures.'
+    required: false
+    default: false
+  debug:
+    description:
+      'Enables debug logging for troubleshooting. Use with caution as this log may expose sensitive information.'
+    required: false
+    default: false
+  keep-scan-file:
+    description: 'Upload the scan file as an action artifact.'
+    required: false
+    default: false
+  proxy:
+    description:
+      'Specify a proxy to use when connecting to the Lifecycle server. This property is set using the format
+      <host[:port]>, otherwise, the CLI uses the default HTTP proxy for the JVM.'
+    required: false
+  proxy-user:
+    description: 'Specify proxy credentials in the following format: <username:password>'
+    required: false
+  include-sha-256:
+    description: 'Include the SHA256 in the scan file'
+    required: false
+    default: false
+  exclude-maven-dependency-management:
+    description:
+      'Enable this parameter to limit analysis to the projects dependencies section of a pom file while excluding the
+      components under the dependencyManagement section.'
+    required: false
+    default: false
+
+# Define your outputs here.
+outputs:
+  scan-id:
+    description: 'Scan id result of the run operation'
+  report-url:
+    description: 'Use this link to navigate directly to the report'
+
+runs:
+  using: node20
+  main: dist/index.js
