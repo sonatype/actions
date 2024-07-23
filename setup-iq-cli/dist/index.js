@@ -28861,7 +28861,6 @@ async function run() {
             core.info(`Download path is: ${iqCliPath}`);
             cachedPath = await tc.cacheFile(iqCliPath, constants_1.IQ_CLI_JAR, 'iq-cli', iqCliVersion);
         }
-        core.addPath(cachedPath);
         // Set outputs for other workflow steps to use
         core.setOutput('result', `IQ CLI version ${iqCliVersion} is ready to be used`);
     }
