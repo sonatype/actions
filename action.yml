@@ -1,0 +1,12 @@
+name: 'Sonatype GitHub Actions'
+description: 'A set of Sonatype actions for checking your applications for vulnerabilities'
+author: 'Sonatype'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: sonatype/actions/evaluate@v1
