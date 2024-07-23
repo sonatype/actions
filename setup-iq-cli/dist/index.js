@@ -28850,19 +28850,19 @@ async function run() {
         }
         const validatedDownloadUrl = DOWNLOAD_URL.replace('{iq-cli-pattern}', filePath);
         // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-        core.info(`Setting up IQ CLI version ${iqCliVersion}`);
+        core.debug(`Setting up IQ CLI version ${iqCliVersion}`);
         let cachedPath = tc.find('iq-cli', iqCliVersion);
         if (cachedPath) {
-            core.info(`IQ CLI version ${iqCliVersion} found in cache`);
+            core.debug(`IQ CLI version ${iqCliVersion} found in cache`);
         }
         else {
-            core.info(`Downloading IQ CLI version ${iqCliVersion}`);
+            core.debug(`Downloading IQ CLI version ${iqCliVersion}`);
             const iqCliPath = await tc.downloadTool(validatedDownloadUrl, constants_1.IQ_CLI_JAR);
-            core.info(`Download path is: ${iqCliPath}`);
+            core.debug(`Download path is: ${iqCliPath}`);
             cachedPath = await tc.cacheFile(iqCliPath, constants_1.IQ_CLI_JAR, 'iq-cli', iqCliVersion);
         }
         // Set outputs for other workflow steps to use
-        core.setOutput('result', `IQ CLI version ${iqCliVersion} is ready to be used`);
+        core.info(`Sonatype CLI version ${iqCliVersion} was set up and it's available in GitHub runners.`);
     }
     catch (error) {
         // Fail the workflow run if an error occurs

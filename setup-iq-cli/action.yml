@@ -13,11 +13,6 @@ inputs:
     description: 'IQ CLI version to be used'
     required: true
 
-# Define your outputs here.
-outputs:
-  result:
-    description: 'Message stating the result of the setup operation'
-
 runs:
   using: node20
   main: dist/index.js
