@@ -11,6 +11,14 @@
 A [GitHub Action](https://github.com/features/actions) for running
 [Sonatype CLI](https://help.sonatype.com/en/sonatype-iq-cli.html) in GitHub workflows.
 
+### Java Requirements
+
+This action (i.e. `sonatype/actions/run-iq-cli`) needs to have Sonatype CLI and a JDK properly configured to be able to
+work. [Setup Sonatype CLI](../setup-iq-cli/README.md) action provided in this action set.
+
+Sonatype CLI versions 174 and older require Java 8 or 11 to run. For Sonatype CLI release 175 and above, we recommend
+using Java 17, which will be the minimum supported Java version for all the releases beyond 179.
+
 ## Usage Example
 
 ```yaml
@@ -21,17 +29,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # some steps are omitted...
+      # Make Sonatype CLI available to GitHub runners
+      - name: Setup Sonatype CLI
+        uses: sonatype/actions/setup-iq-cli@v1
+        with:
+          iq-cli-version: 1.179.0-01
+
       # Sonatype CLI requires Java to run
       - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
           java-version: '17'
-      # Make Sonatype CLI available to GitHub runners
-      - name: Setup Sonatype CLI
-        uses: sonatype/actions/setup-iq-cli@v1
-        with:
-          iq-cli-version: 1.178.0-06
+
       # Run Sonatype CLI
       - name: Run Sonatype CLI
         uses: sonatype/actions/run-iq-cli@v1

@@ -48,7 +48,7 @@ jobs:
       # Fetch the SBOM file associated with the evaluation
       - name: Fetch SBOM
         uses: sonatype/actions/fetch-sbom@v1
-        if: always()
+        if: ( success() || failure() ) && steps.evaluate.outputs.scan-id 
         with:
           iq-server-url: https://your.lifecycle.server
           username: ${{ secrets.LIFECYCLE_USERNAME }}

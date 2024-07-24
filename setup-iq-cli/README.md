@@ -14,6 +14,9 @@ subsequent actions. The action downloads and configures the requested version of
 
 ## Usage Example
 
+Here's an example of how the setup action can be used in your code. Note that this is a prerequisite for the
+[Run Sonatype CLI](../run-iq-cli/README.md) action provided in this action set.
+
 ```yaml
 name: Sonatype Workflow
 on: push

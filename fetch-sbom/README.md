@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # some steps are omitted...
-      # Run Sonatype CLI
-      - name: Run Sonatype CLI
-        id: run-iq-cli
-        uses: sonatype/actions/run-iq-cli@v1
+      # Evaluate Sonatype CLI
+      - name: Evaluate Sonatype CLI
+        id: evaluate
+        uses: sonatype/actions/evaluate@v1
         with:
           iq-server-url: https://your.lifecycle.server
           username: ${{ secrets.LIFECYCLE_USERNAME }}
@@ -35,13 +35,13 @@ jobs:
       # Fetch the SBOM file associated with the previous Sonatype CLI run
       - name: Fetch SBOM
         uses: sonatype/actions/fetch-sbom@v1
-        if: always()
+        if: ( success() || failure() ) && steps.evaluate.outputs.scan-id
         with:
           iq-server-url: https://your.lifecycle.server
           username: ${{ secrets.LIFECYCLE_USERNAME }}
           password: ${{ secrets.LIFECYCLE_PASSWORD }}
           application-id: lifecycle-app
-          scan-id: ${{ steps.run-iq-cli.outputs.scan-id }}
+          scan-id: ${{ steps.evaluate.outputs.scan-id }}
           sbom-standard: cyclonedx
           sbom-version: 1.5
           artifact-name: my-sbom

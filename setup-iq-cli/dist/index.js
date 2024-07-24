@@ -28790,7 +28790,7 @@ exports.IQ_CLI_JAR = void 0;
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
  *  "Sonatype" is a trademark of Sonatype, Inc.
  */
-exports.IQ_CLI_JAR = 'iq-cli.jar';
+exports.IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 
 
 /***/ }),
