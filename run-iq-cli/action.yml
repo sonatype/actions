@@ -30,6 +30,9 @@ inputs:
     description: 'Paths to specific files, directories, or docker images.'
     required: true
 
+  iq-cli-version:
+    description: 'IQ CLI version to be used'
+    required: false
   stage:
     description: 'Specify the development lifecycle stage for the analysis.'
     required: false

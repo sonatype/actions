@@ -111,6 +111,7 @@ runs:
       id: run-iq-cli
       uses: sonatype/actions/run-iq-cli@v1
       with:
+        iq-cli-version: ${{ steps.setup-iq-cli.outputs.iq-cli-version }}
         username: ${{ inputs.username }}
         password: ${{ inputs.password }}
         iq-server-url: ${{ inputs.iq-server-url }}

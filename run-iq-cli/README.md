@@ -76,9 +76,13 @@ jobs:
 > for more details. `Optional`
 
 > **scan-targets**\
-> Space separated list of paths to specific files, directory, or docker image.
+> Space separated list of paths to specific files, directories, or docker images.
 > [Apache Ant-styled patterns](https://ant.apache.org/manual/dirtasks.html#patterns) are allowed. See supported file
 > formats in [Analysis](https://help.sonatype.com/en/analysis.html). `Required`
+
+> **iq-cli-version**\
+> The CLI version to be used for evaluation, usually installed by a previous `setup-iq-cli` action. Defaults to the
+> latest CLI found on the current GitHub runner. `Optional`
 
 > **stage**\
 > Specify the development lifecycle stage for the analysis. Defaults to the `build` stage. `Optional`
@@ -87,7 +91,7 @@ jobs:
 > If set, the analysis output (in JSON format) will be uploaded as a run artifact with the specified name. `Optional`
 
 > **module-exclude**\
-> Specify module files to ignore via Apache Ant-styled patterns. `Optional`
+> Space separated list of module files to ignore via Apache Ant-styled patterns. `Optional`
 
 > **fail-on-policy-warnings**\
 > Causes a failure of the evaluation if any warnings are encountered. Default: `false`. `Optional`

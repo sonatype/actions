@@ -84,7 +84,7 @@ jobs:
 > If set, the analysis output (in JSON format) will be stored as a run artifact with the specified name. `Optional`
 
 > **module-exclude**\
-> Specify module files to ignore via Apache Ant-styled patterns. `Optional`
+> Space separated list of module files to ignore via Apache Ant-styled patterns. `Optional`
 
 > **fail-on-policy-warnings**\
 > Causes a failure of the evaluation if any warnings are encountered. Default: `false`. `Optional`

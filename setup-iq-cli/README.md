@@ -35,3 +35,8 @@ jobs:
 > **iq-cli-version**\
 > Sonatype CLI version to be used. It could be a full version (e.g. 1.179.0-01), a short version (e.g. 179) or `latest`.
 > `Required`
+
+## Output
+
+> **iq-cli-version**\
+> Semver valid version of the IQ CLI configured. It can be used as an input parameter for run-iq-cli.

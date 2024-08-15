@@ -13,6 +13,11 @@ inputs:
     description: 'IQ CLI version to be used'
     required: true
 
+# Define your outputs here.
+outputs:
+  iq-cli-version:
+    description: 'Semver valid version of the IQ CLI'
+
 runs:
   using: node20
   main: dist/index.js
