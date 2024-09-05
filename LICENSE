@@ -1,3 +1,40 @@
-Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
-Includes the third-party code listed at https://links.sonatype.com/products/nexus/attributions.
-"Sonatype" is a trademark of Sonatype, Inc.
+Copyright (c) 2024-present Sonatype, Inc.
+
+IMPORTANT LICENSE AGREEMENT
+===========================
+
+If you do not accept and agree to the following license terms, do not access, download or use the integration software
+(the “Integration”).
+
+Subject to the terms of this license, Sonatype grants to you a non-transferable, non-assignable, non-sublicensable,
+non-exclusive, limited license to use the Integration solely in conjunction with Sonatype products for your internal
+business purposes only, provided that you preserve all copyright and other proprietary notices and include a copy of
+this license with every copy of the Integration.  Sonatype hereby reserves the right to revoke the license granted
+herein and to terminate this license at any time, at its sole and absolute discretion, upon written notice to you.
+
+Subject to the limited rights expressly granted herein, Sonatype, for itself and on behalf of its licensors, reserves
+all rights in the Integration (including all improvements, modifications, derivative works and innovations thereto)
+that are not expressly granted to you herein, and you acknowledge and agree that, except as otherwise expressly set
+forth herein, Sonatype owns all rights, title and interest in and to the Integration.
+
+You shall comply with all export and sanctions laws and regulations of the United States and other applicable
+jurisdictions when performing your obligations and/or exercising your rights hereunder. You represent and warrant that
+neither you nor any of your officers or directors are identified on any U.S. government list of persons or entities
+prohibited from receiving exports or otherwise subject to sanctions and no such sanctioned party has an interest in you.
+You will not export, reexport or transfer (in-country) the Integration to any jurisdiction subject to comprehensive U.S.
+sanctions, to any party that is subject to U.S. sanctions, or to any party subject to a U.S. export licensing
+requirement without first obtaining such a license.
+
+The Integration is provided “AS IS” WITHOUT WARRANTY OF ANY KIND. SONATYPE MAKES NO, AND HEREBY DISCLAIMS ANY AND ALL,
+REPRESENTATIONS OR WARRANTIES REGARDING THE SOFTWARE, INCLUDING ANY EXPRESS OR IMPLIED WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT. SONATYPE DOES NOT WARRANT THAT THE OPERATION OF THE SOFTWARE
+WILL BE ERROR-FREE OR UNINTERRUPTED.
+
+IN NO EVENT WILL SONATYPE OR ITS LICENSORS BE LIABLE (WHETHER IN CONTRACT, WARRANTY, TORT (INCLUDING NEGLIGENCE),
+PRODUCT LIABILITY OR OTHER THEORY), TO YOU OR ANY OTHER PERSON OR ENTITY FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, PUNITIVE OR EXEMPLARY DAMAGES (INCLUDING DAMAGES FOR LOSS OF PROFIT, BUSINESS OR DATA) IN EXCESS OF
+$50.00, IN AGGREGATE, ARISING OUT OF YOUR USE OF THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The validity, construction and performance of this Agreement shall be governed by and construed in accordance with the
+laws of the State of Maryland, without regard to any conflicts of laws or choice of law rules, and each Party agrees to
+submit to the exclusive jurisdiction of the State and Federal courts located in the State of Maryland.
