@@ -37,7 +37,7 @@ jobs:
 
       # Sonatype CLI requires Java to run
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
