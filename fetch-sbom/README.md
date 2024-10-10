@@ -43,7 +43,7 @@ jobs:
           application-id: lifecycle-app
           scan-id: ${{ steps.evaluate.outputs.scan-id }}
           sbom-standard: cyclonedx
-          sbom-version: 1.5
+          sbom-version: 1.6
           artifact-name: my-sbom
 ```
 
@@ -69,7 +69,8 @@ jobs:
 
 > **sbom-version**\
 > The version of the SBOM standard.\
-> Available CycloneDX versions: `1.2`, `1.3`, `1.4`, `1.5`. Available SPDX versions: `2.3`. `Required`
+> Available CycloneDX versions: `1.2`, `1.3`, `1.4`, `1.5`, `1.6` (1.6 as default value). Available SPDX versions: `2.3`
+> (2.3 as default value). `Optional`
 
 > **sbom-format**\
 > The output file format: `json` or `xml`. Default: `json`. `Optional`

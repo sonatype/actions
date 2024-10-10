@@ -10,8 +10,12 @@ branding:
 # Define your inputs here.
 inputs:
   iq-cli-version:
-    description: 'IQ CLI version to be used'
-    required: true
+    description: 'IQ CLI version to be used. Must be provided if `iq-cli-download-url` is not provided.'
+    required: false
+  iq-cli-download-url:
+    description:
+      'The URL from where the IQ CLI jar file will be downloaded. Must be provided if `iq-cli-version` is not provided.'
+    required: false
 
 # Define your outputs here.
 outputs:

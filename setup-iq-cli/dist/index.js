@@ -31333,7 +31333,7 @@ module.exports = validRange
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.LATEST_IQ_VERSION = exports.MINIMUM_SUPPORTED_IQ_VERSION = exports.DOWNLOAD_URL = exports.IQ_VERSION_TO_COMPLETE = exports.IQ_CLI_JAR = void 0;
+exports.IQ_CLI_DOWNLOAD_URL = exports.IQ_CLI_VERSION = exports.LATEST_IQ_VERSION = exports.MINIMUM_SUPPORTED_IQ_VERSION = exports.DOWNLOAD_URL = exports.IQ_VERSION_TO_COMPLETE = exports.IQ_CLI_JAR = void 0;
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
@@ -31343,7 +31343,9 @@ exports.IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 exports.IQ_VERSION_TO_COMPLETE = '1.{iq-cli-version}.0-01';
 exports.DOWNLOAD_URL = 'https://download.sonatype.com/clm/scanner/nexus-iq-cli-{iq-cli-version}.jar';
 exports.MINIMUM_SUPPORTED_IQ_VERSION = 137;
-exports.LATEST_IQ_VERSION = '1.182.0-01'; // This should be updated to the latest IQ CLI version with each release
+exports.LATEST_IQ_VERSION = '1.183.0-01'; // This should be updated to the latest IQ CLI version with each release
+exports.IQ_CLI_VERSION = 'iq-cli-version';
+exports.IQ_CLI_DOWNLOAD_URL = 'iq-cli-download-url';
 
 
 /***/ }),
@@ -31433,10 +31435,7 @@ exports.getValidatedIQCLIVersion = getValidatedIQCLIVersion;
 const core = __importStar(__nccwpck_require__(5316));
 const constants_1 = __nccwpck_require__(9733);
 function getValidatedIQCLIVersion() {
-    const input = core.getInput('iq-cli-version');
-    if (!input) {
-        throw Error('"iq-cli-version" is a required input.');
-    }
+    const input = core.getInput(constants_1.IQ_CLI_VERSION);
     if (input === 'latest') {
         return constants_1.LATEST_IQ_VERSION;
     }
@@ -31503,17 +31502,47 @@ const get_semver_version_1 = __nccwpck_require__(8917);
  */
 async function run() {
     try {
-        const iqCliVersion = (0, get_validated_iq_cli_version_1.getValidatedIQCLIVersion)();
-        const validatedDownloadUrl = constants_1.DOWNLOAD_URL.replace('{iq-cli-version}', iqCliVersion);
-        const semverVersion = (0, get_semver_version_1.getSemverVersion)(iqCliVersion);
-        // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-        core.debug(`Setting up IQ CLI version ${iqCliVersion}`);
-        let cachedPath = tc.find('iq-cli', semverVersion);
+        // If provided, iq-cli.jar found in this url will be downloaded
+        // Otherwise we download the latest from download.sonatype.com
+        // (unless a specific version was requested by yet another optional parameter: iq-cli-version)
+        const iqCliUrl = core.getInput(constants_1.IQ_CLI_DOWNLOAD_URL);
+        let iqCliVersion = core.getInput(constants_1.IQ_CLI_VERSION);
+        if (iqCliVersion && iqCliUrl) {
+            throw new Error(`${constants_1.IQ_CLI_VERSION} and ${constants_1.IQ_CLI_DOWNLOAD_URL} can not be provided at the same time`);
+        }
+        if (!iqCliVersion && !iqCliUrl) {
+            throw new Error(`Either of ${constants_1.IQ_CLI_VERSION} or ${constants_1.IQ_CLI_DOWNLOAD_URL} must be provided`);
+        }
+        let validatedDownloadUrl;
+        let semverVersion;
+        let cachedPath;
+        if (iqCliUrl) {
+            // If a custom iq cli url is provided, we do not know its version
+            // It might be http://intranet.customer/iq.jar
+            // We have to download it each time and will not know its version info
+            iqCliVersion = '9.9.9';
+            semverVersion = '9.9.9';
+            validatedDownloadUrl = iqCliUrl;
+            cachedPath = undefined;
+        }
+        else {
+            iqCliVersion = (0, get_validated_iq_cli_version_1.getValidatedIQCLIVersion)();
+            validatedDownloadUrl = constants_1.DOWNLOAD_URL.replace('{iq-cli-version}', iqCliVersion);
+            semverVersion = (0, get_semver_version_1.getSemverVersion)(iqCliVersion);
+            cachedPath = tc.find('iq-cli', semverVersion);
+            // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
+            core.debug(`Setting up IQ CLI version ${iqCliVersion}`);
+        }
         if (cachedPath) {
             core.debug(`IQ CLI version ${semverVersion} found in cache`);
         }
         else {
-            core.debug(`Downloading IQ CLI version ${iqCliVersion}`);
+            if (iqCliUrl) {
+                core.debug(`Downloading IQ CLI from the custom url provided: ${iqCliUrl}`);
+            }
+            else {
+                core.debug(`Downloading IQ CLI version ${iqCliVersion}`);
+            }
             const iqCliPath = await tc.downloadTool(validatedDownloadUrl, constants_1.IQ_CLI_JAR);
             core.debug(`Download path is: ${iqCliPath}`);
             cachedPath = await tc.cacheFile(iqCliPath, constants_1.IQ_CLI_JAR, 'iq-cli', semverVersion);
@@ -31522,8 +31551,13 @@ async function run() {
         }
         core.debug(`Cached path with find are: ${path_1.default.join(cachedPath, constants_1.IQ_CLI_JAR)}`);
         // Set outputs for other workflow steps to use
-        core.setOutput('iq-cli-version', semverVersion);
-        core.info(`Sonatype CLI version ${semverVersion} was set up and it's available in GitHub runners.`);
+        core.setOutput(constants_1.IQ_CLI_VERSION, semverVersion);
+        if (iqCliUrl) {
+            core.info(`Sonatype CLI version was set up from the custom URL provided and it's available in GitHub runners.`);
+        }
+        else {
+            core.info(`Sonatype CLI version ${semverVersion} was set up and it's available in GitHub runners.`);
+        }
     }
     catch (error) {
         // Fail the workflow run if an error occurs
