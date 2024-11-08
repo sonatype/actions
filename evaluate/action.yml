@@ -12,13 +12,13 @@ branding:
 # Define your inputs here.
 inputs:
   username:
-    description: 'The username to authenticate with IQ Server'
+    description: 'The username to authenticate with IQ Server.'
     required: true
   password:
-    description: 'The password to authenticate with IQ Server'
+    description: 'The password to authenticate with IQ Server.'
     required: true
   application-id:
-    description: 'The IQ Server application ID'
+    description: 'The IQ Server application ID.'
     required: true
   organization-id:
     description: 'The ID for the organization to which the application belongs.'
@@ -74,7 +74,7 @@ inputs:
     description: 'Specify proxy credentials in the following format: <username:password>'
     required: false
   include-sha-256:
-    description: 'Include the SHA256 in the scan file'
+    description: 'Include the SHA256 in the scan file.'
     required: false
     default: false
   exclude-maven-dependency-management:
@@ -88,10 +88,10 @@ inputs:
 outputs:
   scan-id:
     value: ${{ steps.run-iq-cli.outputs.scan-id }}
-    description: 'Scan id result of the run operation'
+    description: 'Scan id result of the run operation.'
   report-url:
     value: ${{ steps.run-iq-cli.outputs.report-url }}
-    description: 'Use this link to navigate directly to the report'
+    description: 'Use this link to navigate directly to the report.'
 
 runs:
   using: 'composite'
