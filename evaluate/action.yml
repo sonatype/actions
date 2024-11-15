@@ -83,6 +83,15 @@ inputs:
       components under the dependencyManagement section.'
     required: false
     default: false
+  sarif-file:
+    description:
+      'Generates a SARIF file containing all found vulnerabilities and attempts using it to update the "Code scanning"
+      section under the Security tab (if enabled). The SARIF file extension must be .sarif or .json'
+    required: false
+  upload-sarif-file:
+    description: 'Upload the SARIF file to be shown on Security tab'
+    required: false
+    default: false
 
 # Define your outputs here.
 outputs:
@@ -98,7 +107,7 @@ runs:
   steps:
     - name: Setup IQ CLI Action
       id: setup-iq-cli
-      uses: sonatype/actions/setup-iq-cli@v1
+      uses: sonatype/actions/setup-iq-cli@v1.0.6-beta
       with:
         iq-cli-version: 'latest'
 
@@ -109,7 +118,7 @@ runs:
 
     - name: Run IQ CLI Action
       id: run-iq-cli
-      uses: sonatype/actions/run-iq-cli@v1
+      uses: sonatype/actions/run-iq-cli@v1.0.6-beta
       with:
         iq-cli-version: ${{ steps.setup-iq-cli.outputs.iq-cli-version }}
         username: ${{ inputs.username }}
@@ -130,3 +139,11 @@ runs:
         proxy-user: ${{ inputs.proxy-user }}
         include-sha-256: ${{ inputs.include-sha-256 }}
         exclude-maven-dependency-management: ${{ inputs.exclude-maven-dependency-management }}
+        sarif-file: ${{ inputs.sarif-file }}
+        upload-sarif-file: ${{ inputs.upload-sarif-file }}
+
+    - name: Upload result to GitHub Code Scanning
+      if: ${{ steps.run-iq-cli.outputs.sarif-file }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.run-iq-cli.outputs.sarif-file }}

@@ -87,6 +87,11 @@ inputs:
       components under the dependencyManagement section.'
     required: false
     default: false
+  sarif-file:
+    description:
+      'Generates a SARIF file containing all found vulnerabilities and attempts using it to update the "Code scanning"
+      section under the Security tab (if enabled). The SARIF file extension must be .sarif or .json'
+    required: false
 
 # Define your outputs here.
 outputs:
@@ -94,6 +99,8 @@ outputs:
     description: 'Scan id result of the run operation'
   report-url:
     description: 'Use this link to navigate directly to the report'
+  sarif-file:
+    description: 'Name of the generated SARIF file containing all found vulnerabilities'
 
 runs:
   using: node20
