@@ -139,11 +139,10 @@ runs:
         proxy-user: ${{ inputs.proxy-user }}
         include-sha-256: ${{ inputs.include-sha-256 }}
         exclude-maven-dependency-management: ${{ inputs.exclude-maven-dependency-management }}
-        sarif-file: ${{ inputs.sarif-file }}
-        upload-sarif-file: ${{ inputs.upload-sarif-file }}
+        sarif-file: ${{ inputs.sarif-file || inputs.upload-sarif-file }}
 
     - name: Upload result to GitHub Code Scanning
-      if: ${{ steps.run-iq-cli.outputs.sarif-file }}
+      if: ${{ inputs.upload-sarif-file == 'true' && steps.run-iq-cli.outputs.sarif-file != '' }}
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: ${{ steps.run-iq-cli.outputs.sarif-file }}
