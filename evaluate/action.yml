@@ -85,11 +85,12 @@ inputs:
     default: false
   sarif-file:
     description:
-      'Generates a SARIF file containing all found vulnerabilities and attempts using it to update the "Code scanning"
-      section under the Security tab (if enabled). The SARIF file extension must be .sarif or .json'
+      'Generates a SARIF file containing all found vulnerabilities. The SARIF file extension must be .sarif or .json'
     required: false
   upload-sarif-file:
-    description: 'Upload the SARIF file to be shown on Security tab'
+    description:
+      'Generates, or uses the generated sarif-file, and attempts using it to update the "Code scanning" section under
+      the Security tab (if enabled)'
     required: false
     default: false
 
@@ -101,6 +102,9 @@ outputs:
   report-url:
     value: ${{ steps.run-iq-cli.outputs.report-url }}
     description: 'Use this link to navigate directly to the report.'
+  sarif-file:
+    value: ${{ steps.run-iq-cli.outputs.sarif-file }}
+    description: 'Name of the generated SARIF file containing all found vulnerabilities'
 
 runs:
   using: 'composite'
@@ -142,7 +146,7 @@ runs:
         sarif-file: ${{ inputs.sarif-file || inputs.upload-sarif-file }}
 
     - name: Upload result to GitHub Code Scanning
-      if: ${{ inputs.upload-sarif-file == 'true' && steps.run-iq-cli.outputs.sarif-file != '' }}
+      if: ( success() || failure() ) && steps.run-iq-cli.outputs.sarif-file && inputs.upload-sarif-file == 'true'
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: ${{ steps.run-iq-cli.outputs.sarif-file }}
