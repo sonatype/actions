@@ -89,8 +89,7 @@ inputs:
     default: false
   sarif-file:
     description:
-      'Generates a SARIF file containing all found vulnerabilities and attempts using it to update the "Code scanning"
-      section under the Security tab (if enabled). The SARIF file extension must be .sarif or .json'
+      'Generates a SARIF file containing all found vulnerabilities. The SARIF file extension must be .sarif or .json'
     required: false
 
 # Define your outputs here.
