@@ -62,7 +62,7 @@ jobs:
 > Lifecycle (IQ Server) application ID. `Required`
 
 > **scan-id**\
-> The SBOM file associated with the provided scan ID is fetched and stored as an action artifact. `Required`
+> The scan ID to fetch the report. `Required`
 
 > **sbom-standard**\
 > The SBOM standard: `spdx` or `cyclonedx`. `Required`

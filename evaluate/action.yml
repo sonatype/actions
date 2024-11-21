@@ -11,49 +11,54 @@ branding:
 
 # Define your inputs here.
 inputs:
+  iq-server-url:
+    description: 'Lifecycle (IQ Server) URL (e.g. http://localhost:8070).'
+    required: true
   username:
-    description: 'The username to authenticate with IQ Server.'
+    description: 'The username to authenticate with Lifecycle (IQ Server).'
     required: true
   password:
-    description: 'The password to authenticate with IQ Server.'
+    description: 'The password to authenticate with Lifecycle (IQ Server).'
     required: true
   application-id:
-    description: 'The IQ Server application ID.'
-    required: true
-  organization-id:
-    description: 'The ID for the organization to which the application belongs.'
-    required: false
-  iq-server-url:
-    description: 'The location of your Lifecycle server (e.g. http://localhost:8070).'
+    description:
+      'Lifecycle (IQ Server) application ID. When Automatic Applications is enabled and the application ID has not yet
+      been used, a new application will be created with the given ID.'
     required: true
   scan-targets:
-    description: 'Paths to specific files, directories, or docker images.'
+    description:
+      'Space-separated list of paths to specific files, directories, or docker images. Apache Ant-styled patterns are
+      allowed.'
     required: true
+  organization-id:
+    description:
+      'The ID for the Lifecycle organization to which the application belongs. When automatic application creation is
+      enabled and the application does not exist, it will be created under the organization having the provided
+      organization ID.'
+    required: false
   stage:
-    description: 'Specify the development lifecycle stage for the analysis.'
+    description: 'Specify the development lifecycle stage for the analysis. Defaults to the build stage.'
     required: false
     default: 'build'
   result-file:
-    description: 'Will upload the result file as an action artifact.'
+    description:
+      'If set, the analysis output (in JSON format) will be uploaded as a run artifact with the specified name.'
     required: false
   module-exclude:
-    description:
-      'Specify module files to ignore via Apache Ant-styled patterns. Repeat the option for multiple specifications.'
+    description: 'Space-separated list of module files to ignore via Apache Ant-styled patterns.'
     required: false
   fail-on-policy-warnings:
     description: 'Causes a failure of the evaluation if any warnings are encountered.'
     required: false
     default: false
   ignore-system-errors:
-    description:
-      'Ignore system errors (e.g. IO, Network, server, etc.) when running on continuous integration servers to avoid
-      unintentional build failures.'
+    description: 'Ignore system errors (e.g. IO, Network, server, etc.) to avoid unintentional build failures.'
     required: false
     default: false
   ignore-scanning-errors:
     description:
-      'Ignore scanning errors (e.g. invalid files, inaccessible files, etc) when the code base contains invalid files
-      for testing purposes. Scanning these files may cause unintentional build failures.'
+      'Ignore scanning errors (e.g. invalid files, inaccessible files, etc). It is useful when the code base contains
+      invalid files for testing purposes. Scanning these files may cause unintentional build failures.'
     required: false
     default: false
   debug:
@@ -62,19 +67,19 @@ inputs:
     required: false
     default: false
   keep-scan-file:
-    description: 'Upload the scan file as an action artifact.'
+    description: 'Retains and uploads the scan file as an action artifact.'
     required: false
     default: false
   proxy:
     description:
-      'Specify a proxy to use when connecting to the Lifecycle server. This property is set using the format
-      <host[:port]>, otherwise, the CLI uses the default HTTP proxy for the JVM.'
+      'Specify a proxy to use when connecting to Lifecycle (IQ Server). This property is set using the format
+      host[:port], otherwise, the CLI uses the default HTTP proxy set with the JVM.'
     required: false
   proxy-user:
-    description: 'Specify proxy credentials in the following format: <username:password>'
+    description: 'Specify proxy credentials in the following format: username:password.'
     required: false
   include-sha-256:
-    description: 'Include the SHA256 in the scan file.'
+    description: 'If set, SHA256 checksums are included in the scan file.'
     required: false
     default: false
   exclude-maven-dependency-management:
@@ -85,12 +90,14 @@ inputs:
     default: false
   sarif-file:
     description:
-      'Generates a SARIF file containing all found vulnerabilities. The SARIF file extension must be .sarif or .json'
+      'Generates a SARIF file with a specified name containing all identified vulnerabilities. The SARIF file extension
+      must be .sarif or .json. The generated file will be uploaded as an action artifact.'
     required: false
   upload-sarif-file:
     description:
-      'Generates, or uses the generated sarif-file, and attempts using it to update the "Code scanning" section under
-      the Security tab (if enabled)'
+      'Enable this parameter to generate or use the generated sarif-file to update the "Code scanning" section under the
+      GitHub repository''s Security tab. If sarif-file is not defined, the generated file will be named result.sarif by
+      default, and it will be uploaded as an action artifact.'
     required: false
     default: false
 
@@ -98,13 +105,14 @@ inputs:
 outputs:
   scan-id:
     value: ${{ steps.run-iq-cli.outputs.scan-id }}
-    description: 'Scan id result of the run operation.'
+    description:
+      'Scan id result of the run operation. It can be used to access the Lifecycle report of related artifacts.'
   report-url:
     value: ${{ steps.run-iq-cli.outputs.report-url }}
-    description: 'Use this link to navigate directly to the report.'
+    description: 'Link to navigate directly to the analysis report in Lifecycle (IQ Server).'
   sarif-file:
     value: ${{ steps.run-iq-cli.outputs.sarif-file }}
-    description: 'Name of the generated SARIF file containing all found vulnerabilities'
+    description: 'Name of the generated SARIF file containing all found vulnerabilities, if configured.'
 
 runs:
   using: 'composite'

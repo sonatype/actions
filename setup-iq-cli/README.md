@@ -37,11 +37,10 @@ the Sonatype CLI JAR file will be downloaded from the specified location URL.
 
 > **iq-cli-version**\
 > Sonatype CLI version to be used. It could be a full version (e.g. 1.179.0-01), a short version (e.g. 179) or `latest`.
-> This parameter must be provided if `iq-cli-download-url` is not specified.
+> Either this or `iq-cli-download-url` is required.
 
 > **iq-cli-download-url**\
-> The URL from where the IQ CLI jar file will be downloaded. This parameter must be provided if `iq-cli-version` is not
-> specified.
+> URL from where the IQ CLI jar file will be downloaded. Either this or `iq-cli-version` is required.
 
 ## Output
 

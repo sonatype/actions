@@ -73,7 +73,7 @@ jobs:
 > for more details. `Optional`
 
 > **scan-targets**\
-> Space separated list of paths to specific files, directories or docker images.
+> Space-separated list of paths to specific files, directories or docker images.
 > [Apache Ant-styled patterns](https://ant.apache.org/manual/dirtasks.html#patterns) are allowed. See supported file
 > formats in [Analysis](https://help.sonatype.com/en/analysis.html). `Required`
 
@@ -84,7 +84,8 @@ jobs:
 > If set, the analysis output (in JSON format) will be stored as a run artifact with the specified name. `Optional`
 
 > **module-exclude**\
-> Space separated list of module files to ignore via Apache Ant-styled patterns. `Optional`
+> Space-separated list of module files to ignore via
+> [Apache Ant-styled patterns](https://ant.apache.org/manual/dirtasks.html#patterns). `Optional`
 
 > **fail-on-policy-warnings**\
 > Causes a failure of the evaluation if any warnings are encountered. Default: `false`. `Optional`
@@ -118,10 +119,25 @@ jobs:
 > Enable this parameter to limit analysis to the projects dependencies section of a pom file while excluding the
 > components under the dependencyManagement section. Default: `false`. `Optional`
 
+> **sarif-file**\
+> Generates a SARIF file with a specified name containing all identified vulnerabilities. The SARIF file extension must
+> be .sarif or .json. The generated file will be uploaded as an action artifact. `Optional`
+
+> **upload-sarif-file**\
+> Enable this parameter to generate or use the generated sarif-file to update the "Code scanning" section under the
+> GitHub repository's Security tab. Default: `false`. `Optional`\
+> If sarif-file is not defined, the generated file will be named `result.sarif` by default, and it will be uploaded as
+> an action artifact.\
+> [GitHub Advanced Security](https://docs.github.com/en/get-started/learning-about-github/about-github-advanced-security) is
+> available for GitHub Enterprise and public repositories.
+
 ## Output
 
 > **scan-id**\
 > Scan id result of the run operation. It can be used to access the Lifecycle report of relater artifacts.
 
 > **report-url**\
-> Use this link to navigate directly to the analysis report in Lifecycle (IQ Server).
+> Link to navigate directly to the analysis report in Lifecycle (IQ Server).
+
+> **sarif-file**\
+> Name of the generated SARIF file containing all found vulnerabilities, if configured.

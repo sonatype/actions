@@ -10,17 +10,17 @@ branding:
 # Define your inputs here.
 inputs:
   iq-cli-version:
-    description: 'IQ CLI version to be used. Must be provided if `iq-cli-download-url` is not provided.'
+    description: 'IQ CLI version to be used. Either this or `iq-cli-download-url` is required.'
     required: false
   iq-cli-download-url:
     description:
-      'The URL from where the IQ CLI jar file will be downloaded. Must be provided if `iq-cli-version` is not provided.'
+      'URL from where the IQ CLI jar file will be downloaded. Must be provided if `iq-cli-version` is not specified.'
     required: false
 
 # Define your outputs here.
 outputs:
   iq-cli-version:
-    description: 'Semver valid version of the IQ CLI'
+    description: 'Semver valid version of the IQ CLI configured. It can be used as an input parameter for run-iq-cli.'
 
 runs:
   using: node20
