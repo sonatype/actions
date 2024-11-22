@@ -10,6 +10,9 @@ branding:
 
 # Define your inputs here.
 inputs:
+  iq-cli-version:
+    description: 'IQ CLI version to be used'
+    required: false
   iq-server-url:
     description: 'Lifecycle (IQ Server) URL (e.g. http://localhost:8070).'
     required: true
