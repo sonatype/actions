@@ -8,6 +8,8 @@
 
 # Fetch SBOM Action
 
+> **_NOTE:_** The Fetch SBOM Action is not currently supported in GitHub Enterprise Server environments.
+
 A [GitHub Action](https://github.com/features/actions) for retrieving an SBOM (Software Bill of Materials) file
 associated with a previous Lifecycle evaluation. It supports both the [CycloneDX](https://cyclonedx.org/) and
 [SPDX](https://spdx.dev/) standards.

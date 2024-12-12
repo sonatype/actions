@@ -141,3 +141,39 @@ jobs:
 
 > **sarif-file**\
 > Name of the generated SARIF file containing all found vulnerabilities, if configured.
+
+## GitHub Advanced Security
+
+### Prerequisites
+
+In order to use the GitHub Advanced Security feature, you must grant your workflow the `security-events: write`
+permission.
+
+### Usage Example with Results in GitHub Security Tab
+
+```yaml
+name: Workflow for GitHub Advanced Security
+on: push
+jobs:
+  sonatype-cli:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      # some steps are omitted...
+      # Check out your code
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+      # Perform an evaluation
+      - name: Run evaluate  action
+        id: evaluate
+        uses: sonatype/actions/evaluate@v1
+        with:
+          iq-server-url: https://your.lifecycle.server
+          username: ${{ secrets.LIFECYCLE_USERNAME }}
+          password: ${{ secrets.LIFECYCLE_PASSWORD }}
+          application-id: lifecycle-app
+          scan-targets: package.json
+          upload-sarif-file: true
+```

@@ -10,6 +10,8 @@
 
 A set of [GitHub Actions](https://github.com/features/actions) for interacting with different [Sonatype](https://www.sonatype.com/) products.
 
+Sonatype GitHub Actions also support integration with GitHub Code Scanning, part of the [GitHub Advanced Security](https://docs.github.com/en/get-started/learning-about-github/about-github-advanced-security) feature, which displays detected vulnerabilities on the GitHub Security tab. You can use the `evaluate` or `run-iq-cli` actions in combination with the `upload-sarif-file` parameter to take advantage of this functionality. GitHub Advanced Security is available for GitHub Enterprise customers and public repositories.
+
 The action set currently contains a couple of top-level actions:
 
 - [Evaluate Action](evaluate/README.md)
