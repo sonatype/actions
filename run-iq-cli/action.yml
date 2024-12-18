@@ -104,6 +104,12 @@ outputs:
     description: 'Use this link to navigate directly to the report'
   sarif-file:
     description: 'Name of the generated SARIF file containing all found vulnerabilities, if configured.'
+  result-file-path:
+    description: 'The path to the Result file to upload as artifact'
+  sarif-file-path:
+    description: 'The path to the SARIF file to upload as artifact'
+  scan-file-path:
+    description: 'The path to the Scan file to upload as artifact'
 
 runs:
   using: node20

@@ -48,6 +48,10 @@ inputs:
     required: false
     default: ${{ github.token }}
 
+outputs:
+  sbom-file-path:
+    description: 'The path to the SBOM file to upload as artifact'
+
 runs:
   using: node20
   main: dist/index.js
