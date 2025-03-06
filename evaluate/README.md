@@ -131,6 +131,14 @@ jobs:
 > [GitHub Advanced Security](https://docs.github.com/en/get-started/learning-about-github/about-github-advanced-security) is
 > available for GitHub Enterprise and public repositories.
 
+> **enable-callflow**\
+> Since version 1.3.0, you can perform a call flow analysis in Java or JVM language binaries to determine the method 
+> signatures that trigger a security vulnerability. Default: `false`. `Optional`
+
+> **callflow-namespaces**\
+> Since version 1.3.0, you can limit the call flow analysis to a specific namespace for faster, more precise results. 
+> Multiple namespaces can be delimited by space. Default: `empty`. `Optional`
+
 ## Output
 
 > **scan-id**\

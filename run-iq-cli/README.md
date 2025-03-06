@@ -130,6 +130,14 @@ jobs:
 > Generates a SARIF file with a specified name containing all identified vulnerabilities. The SARIF file extension must
 > be .sarif or .json. The generated file will be uploaded as an action artifact. `Optional`
 
+> **enable-callflow**\
+> Since version 1.3.0, you can perform a call flow analysis in Java or JVM language binaries to determine the method
+> signatures that trigger a security vulnerability. Default: `false`. `Optional`
+
+> **callflow-namespaces**\
+> Since version 1.3.0, you can limit the call flow analysis to a specific namespace for faster, more precise results.
+> Multiple namespaces can be delimited by space. Default: `empty`. `Optional`
+
 ## Output
 
 > **scan-id**\
