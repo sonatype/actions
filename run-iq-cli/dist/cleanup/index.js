@@ -25000,7 +25000,7 @@ cleanup();
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.API_V2_RESOURCE_PATH = exports.DEFAULT_SARIF_FILE = exports.CLI_PARAMS_FILE = exports.TEMP_RESULT_FILE = exports.WORKING_DIR = exports.IQ_CLI_JAR = exports.OUTPUT_SCAN_FILE_PATH = exports.OUTPUT_SARIF_FILE_PATH = exports.OUTPUT_RESULT_FILE_PATH = exports.OUTPUT_SARIF_FILE = exports.OUTPUT_REPORT_URL = exports.OUTPUT_SCAN_ID = exports.CALLFLOW_NAMESPACES = exports.ENABLE_CALLFLOW = exports.INPUT_SARIF_FILE = exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = exports.INPUT_INCLUDE_SHA_256 = exports.INPUT_PROXY_USER = exports.INPUT_PROXY = exports.INPUT_KEEP_SCAN_FILE = exports.INPUT_DEBUG = exports.INPUT_IGNORE_SCANNING_ERRORS = exports.INPUT_IGNORE_SYSTEM_ERRORS = exports.INPUT_FAIL_ON_POLICY_WARNINGS = exports.INPUT_MODULE_EXCLUDE = exports.INPUT_RESULT_FILE = exports.INPUT_STAGE = exports.INPUT_IQ_CLI_VERSION = exports.INPUT_SCAN_TARGETS = exports.INPUT_IQ_SERVER_URL = exports.INPUT_ORGANIZATION_ID = exports.INPUT_APPLICATION_ID = exports.INPUT_PASSWORD = exports.INPUT_USERNAME = void 0;
+exports.API_V2_RESOURCE_PATH = exports.DEFAULT_SARIF_FILE = exports.CLI_PARAMS_FILE = exports.TEMP_RESULT_FILE = exports.WORKING_DIR = exports.IQ_CLI_JAR = exports.OUTPUT_SCAN_FILE_PATH = exports.OUTPUT_SARIF_FILE_PATH = exports.OUTPUT_RESULT_FILE_PATH = exports.OUTPUT_SARIF_FILE = exports.OUTPUT_REPORT_URL = exports.OUTPUT_SCAN_ID = exports.REACHABILITY_NAMESPACES = exports.ENABLE_REACHABILITY = exports.CALLFLOW_NAMESPACES = exports.ENABLE_CALLFLOW = exports.INPUT_SARIF_FILE = exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = exports.INPUT_INCLUDE_SHA_256 = exports.INPUT_PROXY_USER = exports.INPUT_PROXY = exports.INPUT_KEEP_SCAN_FILE = exports.INPUT_DEBUG = exports.INPUT_IGNORE_SCANNING_ERRORS = exports.INPUT_IGNORE_SYSTEM_ERRORS = exports.INPUT_FAIL_ON_POLICY_WARNINGS = exports.INPUT_MODULE_EXCLUDE = exports.INPUT_RESULT_FILE = exports.INPUT_STAGE = exports.INPUT_IQ_CLI_VERSION = exports.INPUT_SCAN_TARGETS = exports.INPUT_IQ_SERVER_URL = exports.INPUT_ORGANIZATION_ID = exports.INPUT_APPLICATION_ID = exports.INPUT_PASSWORD = exports.INPUT_USERNAME = void 0;
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
@@ -25028,6 +25028,8 @@ exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = 'exclude-maven-dependency-ma
 exports.INPUT_SARIF_FILE = 'sarif-file';
 exports.ENABLE_CALLFLOW = 'enable-callflow';
 exports.CALLFLOW_NAMESPACES = 'callflow-namespaces';
+exports.ENABLE_REACHABILITY = 'enable-reachability';
+exports.REACHABILITY_NAMESPACES = 'reachability-namespaces';
 exports.OUTPUT_SCAN_ID = 'scan-id';
 exports.OUTPUT_REPORT_URL = 'report-url';
 exports.OUTPUT_SARIF_FILE = 'sarif-file';
@@ -25086,7 +25088,7 @@ function getAndValidateParameters() {
     const password = core.getInput(constants_1.INPUT_PASSWORD);
     const applicationId = core.getInput(constants_1.INPUT_APPLICATION_ID);
     const organizationId = core.getInput(constants_1.INPUT_ORGANIZATION_ID);
-    const iqServerUrl = core.getInput(constants_1.INPUT_IQ_SERVER_URL);
+    let iqServerUrl = core.getInput(constants_1.INPUT_IQ_SERVER_URL);
     const scanTargets = core.getInput(constants_1.INPUT_SCAN_TARGETS);
     const iqCliVersion = core.getInput(constants_1.INPUT_IQ_CLI_VERSION);
     const stage = core.getInput(constants_1.INPUT_STAGE);
@@ -25104,6 +25106,8 @@ function getAndValidateParameters() {
     let sarifFile = core.getInput(constants_1.INPUT_SARIF_FILE);
     const enableCallflow = core.getBooleanInput(constants_1.ENABLE_CALLFLOW);
     const callflowNamespaces = core.getInput(constants_1.CALLFLOW_NAMESPACES);
+    const enableReachability = core.getBooleanInput(constants_1.ENABLE_REACHABILITY);
+    const reachabilityNamespaces = core.getInput(constants_1.REACHABILITY_NAMESPACES);
     const errorMessages = [];
     const missingRequiredFields = [];
     if (!username) {
@@ -25117,6 +25121,9 @@ function getAndValidateParameters() {
     }
     if (!iqServerUrl) {
         missingRequiredFields.push(constants_1.INPUT_IQ_SERVER_URL);
+    }
+    if (iqServerUrl.endsWith('/')) {
+        iqServerUrl = iqServerUrl.substring(0, iqServerUrl.length - 1);
     }
     if (!applicationId) {
         missingRequiredFields.push(constants_1.INPUT_APPLICATION_ID);
@@ -25167,7 +25174,9 @@ function getAndValidateParameters() {
         excludeMavenDependencyManagement,
         sarifFile,
         enableCallflow,
-        callflowNamespaces
+        callflowNamespaces,
+        enableReachability,
+        reachabilityNamespaces
     };
 }
 

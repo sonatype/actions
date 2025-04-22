@@ -96,15 +96,23 @@ inputs:
       must be .sarif or .json. The generated file will be uploaded as an action artifact.'
     required: false
   enable-callflow:
-    description:
-      'Perform a call flow analysis in Java or JVM language binaries to determine the method signatures that trigger a
-      security vulnerability.'
+    description: 'Deprecated. Use enable-reachability.'
     required: false
     default: false
   callflow-namespaces:
+    description: 'Deprecated. Use reachability-namespaces.'
+    required: false
+    default: ''
+  enable-reachability:
     description:
-      'Limit the call flow analysis to a specific namespace for faster, more precise results. Multiple namespaces can be
-      delimited by space.'
+      'Perform a reachability analysis in Java or JVM language binaries to determine the method signatures that trigger
+      a security vulnerability.'
+    required: false
+    default: false
+  reachability-namespaces:
+    description:
+      'Limit the reachability analysis to a specific namespace for faster, more precise results. Multiple namespaces can
+      be delimited by space.'
     required: false
     default: ''
 

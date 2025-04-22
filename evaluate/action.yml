@@ -101,15 +101,23 @@ inputs:
     required: false
     default: false
   enable-callflow:
-    description:
-      'Perform a call flow analysis in Java or JVM language binaries to determine the method signatures that trigger a
-      security vulnerability.'
+    description: 'Deprecated. Use enable-reachability.'
     required: false
     default: false
   callflow-namespaces:
+    description: 'Deprecated. Use reachability-namespaces.'
+    required: false
+    default: ''
+  enable-reachability:
     description:
-      'Limit the call flow analysis to a specific namespace for faster, more precise results. Multiple namespaces can be
-      delimited by space.'
+      'Perform a reachability analysis in Java or JVM language binaries to determine the method signatures that trigger
+      a security vulnerability.'
+    required: false
+    default: false
+  reachability-namespaces:
+    description:
+      'Limit the reachability analysis to a specific namespace for faster, more precise results. Multiple namespaces can
+      be delimited by space.'
     required: false
     default: ''
 
@@ -131,7 +139,7 @@ runs:
   steps:
     - name: Setup IQ CLI Action
       id: setup-iq-cli
-      uses: sonatype/actions/setup-iq-cli@v1.3.1
+      uses: sonatype/actions/setup-iq-cli@v1.4.0
       with:
         iq-cli-version: 'latest'
 
@@ -142,7 +150,7 @@ runs:
 
     - name: Run IQ CLI Action
       id: run-iq-cli
-      uses: sonatype/actions/run-iq-cli@v1.3.1
+      uses: sonatype/actions/run-iq-cli@v1.4.0
       with:
         iq-cli-version: ${{ steps.setup-iq-cli.outputs.iq-cli-version }}
         username: ${{ inputs.username }}
@@ -166,6 +174,8 @@ runs:
         sarif-file: ${{ inputs.sarif-file || inputs.upload-sarif-file }}
         enable-callflow: ${{ inputs.enable-callflow }}
         callflow-namespaces: ${{ inputs.callflow-namespaces }}
+        enable-reachability: ${{ inputs.enable-reachability }}
+        reachability-namespaces: ${{ inputs.reachability-namespaces }}
 
     - name: Upload result to GitHub Code Scanning
       if: ( success() || failure() ) && steps.run-iq-cli.outputs.sarif-file && inputs.upload-sarif-file == 'true'
