@@ -31343,7 +31343,7 @@ exports.IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 exports.IQ_VERSION_TO_COMPLETE = '1.{iq-cli-version}.0-01';
 exports.DOWNLOAD_URL = 'https://download.sonatype.com/clm/scanner/nexus-iq-cli-{iq-cli-version}.jar';
 exports.MINIMUM_SUPPORTED_IQ_VERSION = 137;
-exports.LATEST_IQ_CLI_VERSION = '2.4.0-01'; // This should be updated to the latest IQ CLI version with each release
+exports.LATEST_IQ_CLI_VERSION = '2.4.1-01'; // This should be updated to the latest IQ CLI version with each release
 exports.IQ_CLI_VERSION = 'iq-cli-version';
 exports.IQ_CLI_DOWNLOAD_URL = 'iq-cli-download-url';
 
