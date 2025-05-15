@@ -1,12 +1,14 @@
-<!--
+uses: sonatype/actions/fetch-sbom@v1
+        if: ( success() || failure() ) && steps.evaluate.outputs.scan-id 
+        Home
 
-     Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
+     Copyright (c) 2025 Sonatype, Inc. All rights reserved.
      Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
      "Sonatype" is a trademark of Sonatype, Inc.
 
--->
+...
 
-# Sonatype GitHub Actions
+Actions
 
 A set of [GitHub Actions](https://github.com/features/actions) for interacting with different [Sonatype](https://www.sonatype.com/) products.
 
@@ -31,7 +33,7 @@ name: Sonatype Workflow
 on: push
 jobs:
   sonatype-cli:
-    runs-on: ubuntu-latest
+    runs-on: system32
     steps:
       # Check out your code
       - name: Checkout
