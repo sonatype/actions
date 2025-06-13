@@ -25066,6 +25066,16 @@ function getAndValidateInputs() {
     if (!validStandards.includes(sbomStandard)) {
         throw new Error(`Invalid SBOM standard: ${sbomStandard}. Valid options are SPDX or CycloneDX.`);
     }
+    if (sbomVersion) {
+        const supportedCycloneDxVersions = ['1.2', '1.3', '1.4', '1.5', '1.6'];
+        if (sbomStandard.toLowerCase() === constants_1.CYCLONEDX_FORMAT && !supportedCycloneDxVersions.includes(sbomVersion)) {
+            throw new Error(`Supported versions for CycloneDX is: ${supportedCycloneDxVersions}`);
+        }
+        const supportedSpdxVersions = ['2.2', '2.3'];
+        if (sbomStandard.toLowerCase() === constants_1.SPDX_FORMAT && !supportedSpdxVersions.includes(sbomVersion)) {
+            throw new Error(`Supported versions for SPDX is: ${supportedSpdxVersions}`);
+        }
+    }
     if (sbomStandard?.toLowerCase() === constants_1.CYCLONEDX_FORMAT && !sbomVersion) {
         sbomVersion = constants_1.CYCLONEDX_16_VERSION;
     }

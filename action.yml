@@ -44,7 +44,7 @@ runs:
   steps:
     - name: Evaluate
       id: evaluate
-      uses: sonatype/actions/evaluate@v1.4.3
+      uses: sonatype/actions/evaluate@v1.5.0
       with:
         iq-server-url: ${{ inputs.iq-server-url }}
         username: ${{ inputs.username }}

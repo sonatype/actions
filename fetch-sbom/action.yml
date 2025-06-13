@@ -32,7 +32,7 @@ inputs:
   sbom-version:
     description:
       'The version of the SBOM (- Available CycloneDX Versions: 1.2, 1.3, 1.4, 1.5, 1.6. Default version for CycloneDX
-      is 1.6 - Available SPDX version: 2.3)'
+      is 1.6 - Available SPDX versions: 2.2, 2.3, Default for SPDX is 2.3)'
     required: false
   artifact-name:
     description: 'The name of the artifact to be uploaded.'

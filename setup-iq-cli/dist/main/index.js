@@ -31343,9 +31343,32 @@ exports.IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 exports.IQ_VERSION_TO_COMPLETE = '1.{iq-cli-version}.0-01';
 exports.DOWNLOAD_URL = 'https://download.sonatype.com/clm/scanner/nexus-iq-cli-{iq-cli-version}.jar';
 exports.MINIMUM_SUPPORTED_IQ_VERSION = 137;
-exports.LATEST_IQ_CLI_VERSION = '2.4.2-01'; // This should be updated to the latest IQ CLI version with each release
+exports.LATEST_IQ_CLI_VERSION = '2.4.3-01'; // This should be updated to the latest IQ CLI version with each release
 exports.IQ_CLI_VERSION = 'iq-cli-version';
 exports.IQ_CLI_DOWNLOAD_URL = 'iq-cli-download-url';
+
+
+/***/ }),
+
+/***/ 848:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
+ *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
+ *  "Sonatype" is a trademark of Sonatype, Inc.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getNextDownloadUrl = getNextDownloadUrl;
+// Given a url like: download.sonatype.com/scanner/nexus-iq-cli-1.178.0-05.jar
+// returns download.sonatype.com/scanner/nexus-iq-cli-1.178.0-06.jar
+function getNextDownloadUrl(url) {
+    const currentBuildNumber = url.substring(url.length - 6, url.length - 4);
+    const nextBuildNumber = (parseInt(currentBuildNumber) + 1).toString().padStart(2, '0');
+    return url.replace(currentBuildNumber, nextBuildNumber);
+}
 
 
 /***/ }),
@@ -31439,13 +31462,37 @@ function getValidatedIQCLIVersion() {
     if (input === 'latest') {
         return constants_1.LATEST_IQ_CLI_VERSION;
     }
+    // Here only for backwards compatibility, see docs on function
     if (/^\d+$/.test(input)) {
-        if (parseInt(input) < constants_1.MINIMUM_SUPPORTED_IQ_VERSION) {
-            throw Error(`IQ minimum supported version is ${constants_1.MINIMUM_SUPPORTED_IQ_VERSION}`);
-        }
-        return constants_1.IQ_VERSION_TO_COMPLETE.replace('{iq-cli-version}', input);
+        return getIqFromMinorVersion(input);
     }
-    return input;
+    // This is similar to 2.1.0-01, just return..
+    // Here the user provided a full version (major.minor.patch-build-number)
+    // This is what we are trying to build anyway so no need for any additional logic..
+    if (/^\d\.\d+\.\d+-\d+$/.test(input)) {
+        return input;
+    }
+    // If the provided value does not match 2.1.0 (or similar) - warn and return
+    // This can happen when user provides 2.10 or similar (which is insufficient)
+    if (!/^\d+\.\d+\.\d+$/.test(input)) {
+        throw Error(`Provided IQ CLI version must be in the form of major.minor.patch`);
+    }
+    // At this point we are handling a provided input that is major.minor.patch
+    // Concat the build number -01 and return
+    // We will handle other possibilities later (-02, -03) if needed
+    return input.concat('-01');
+}
+// The logic within this function is *deprecated* and *not* documented.
+// If the provided input is a single decimal (like 180, 185 and so on..),
+// this returns 1.{provided-version}.0-01
+// This works if all IQ CLI versions were 1.x but we also have 2.x so the provided value is ambiguous.
+function getIqFromMinorVersion(input) {
+    core.warning('Providing a minor version only is deprecated and only works for IQ CLI 1.x');
+    core.warning('Input the desired CLI version in the major.minor.patch form.');
+    if (parseInt(input) < constants_1.MINIMUM_SUPPORTED_IQ_VERSION) {
+        throw Error(`IQ minimum supported version is ${constants_1.MINIMUM_SUPPORTED_IQ_VERSION}`);
+    }
+    return constants_1.IQ_VERSION_TO_COMPLETE.replace('{iq-cli-version}', input);
 }
 
 
@@ -31495,6 +31542,7 @@ const path_1 = __importDefault(__nccwpck_require__(1017));
 const fs_1 = __nccwpck_require__(7147);
 const constants_1 = __nccwpck_require__(9733);
 const get_validated_iq_cli_version_1 = __nccwpck_require__(3391);
+const get_next_download_url_1 = __nccwpck_require__(848);
 const get_semver_version_1 = __nccwpck_require__(8917);
 /**
  * The main function for the action.
@@ -31543,7 +31591,23 @@ async function run() {
             else {
                 core.debug(`Downloading IQ CLI version ${iqCliVersion}`);
             }
-            const iqCliPath = await tc.downloadTool(validatedDownloadUrl, constants_1.IQ_CLI_JAR);
+            let iqCliPath;
+            for (let i = 1; i < 10; i++) {
+                try {
+                    core.debug(`Attempting to download IQ CLI from: ${validatedDownloadUrl}`);
+                    iqCliPath = await tc.downloadTool(validatedDownloadUrl, constants_1.IQ_CLI_JAR);
+                    core.info(`IQ CLI downloaded from: ${validatedDownloadUrl}`);
+                    break;
+                }
+                catch (error) {
+                    core.debug(`Failed to download from: ${validatedDownloadUrl}`);
+                    validatedDownloadUrl = (0, get_next_download_url_1.getNextDownloadUrl)(validatedDownloadUrl);
+                }
+            }
+            if (!iqCliPath) {
+                core.warning(`Failed to download the custom IQ version: ${iqCliVersion}`);
+                throw Error(`Failed to download the custom IQ version: ${iqCliVersion}`);
+            }
             core.debug(`Download path is: ${iqCliPath}`);
             cachedPath = await tc.cacheFile(iqCliPath, constants_1.IQ_CLI_JAR, 'iq-cli', semverVersion);
             // Delete the downloaded file after caching
