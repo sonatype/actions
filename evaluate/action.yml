@@ -139,7 +139,7 @@ runs:
   steps:
     - name: Setup IQ CLI Action
       id: setup-iq-cli
-      uses: sonatype/actions/setup-iq-cli@v1.5.0
+      uses: sonatype/actions/setup-iq-cli@v1.5.1
       with:
         iq-cli-version: 'latest'
 
@@ -150,7 +150,7 @@ runs:
 
     - name: Run IQ CLI Action
       id: run-iq-cli
-      uses: sonatype/actions/run-iq-cli@v1.5.0
+      uses: sonatype/actions/run-iq-cli@v1.5.1
       with:
         iq-cli-version: ${{ steps.setup-iq-cli.outputs.iq-cli-version }}
         username: ${{ inputs.username }}
