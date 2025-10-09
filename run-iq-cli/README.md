@@ -146,5 +146,8 @@ jobs:
 > **report-url**\
 > Link to navigate directly to the analysis report in Lifecycle (IQ Server).
 
+> **priorities-url**\
+> Link to navigate directly to the priorities report in Lifecycle (IQ Server).
+
 > **sarif-file**\
 > Name of the generated SARIF file containing all found vulnerabilities, if configured.

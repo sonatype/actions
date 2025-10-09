@@ -71,8 +71,8 @@ jobs:
 
 > **sbom-version**\
 > The version of the SBOM standard.\
-> Available CycloneDX versions: `1.2`, `1.3`, `1.4`, `1.5`, `1.6` (1.6 as default value). Available SPDX versions: `2.2 and 2.3`
-> (2.3 as default value). `Optional`
+> Available CycloneDX versions: `1.2`, `1.3`, `1.4`, `1.5`, `1.6` (1.6 as default value). Available SPDX versions:
+> `2.2 and 2.3` (2.3 as default value). `Optional`
 
 > **sbom-format**\
 > The output file format: `json` or `xml`. Default: `json`. `Optional`

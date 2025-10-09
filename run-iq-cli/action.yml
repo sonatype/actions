@@ -122,6 +122,8 @@ outputs:
     description: 'Scan id result of the run operation'
   report-url:
     description: 'Use this link to navigate directly to the report'
+  priorities-url:
+    description: 'Use this link to navigate directly to the priorities report'
   sarif-file:
     description: 'Name of the generated SARIF file containing all found vulnerabilities, if configured.'
   result-file-path:
