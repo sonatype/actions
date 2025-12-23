@@ -139,6 +139,29 @@ jobs:
 > Since version 1.3.0, you can limit the reachability analysis to a specific namespace for faster, more precise results.
 > Multiple namespaces can be delimited by space. Default: `empty`. `Optional`
 
+> **reachability-entrypoint-strategy**\
+> Entrypoint strategy for Java reachability analysis. `Optional`
+
+> **enable-reachability-js**\
+> Enable JavaScript reachability analysis. Default: `false`. `Optional`
+
+> **reachability-js-sources**\
+> JavaScript source patterns for reachability analysis (required for JS reachability; these are app files; do not
+> include tests or node_modules files here). Default: `empty`. `Optional`
+
+> **reachability-js-excludes**\
+> JavaScript exclude patterns for reachability analysis (e.g. tests and other source files that are not relevant for the
+> analysis). Default: `empty`. `Optional`
+
+> **reachability-node-path**\
+> Path to Node.js executable. `Optional`
+
+> **reachability-js-project-root**\
+> JavaScript project root directory (i.e. where the main package.json file resides). `Optional`
+
+> **ignore-reachability-errors**\
+> Ignore reachability analysis errors (reachability analysis failed to run). Default: `false`. `Optional`
+
 ## Output
 
 > **scan-id**\

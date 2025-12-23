@@ -37224,7 +37224,7 @@ cleanup();
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.API_V2_RESOURCE_PATH = exports.DEFAULT_SARIF_FILE = exports.CLI_PARAMS_FILE = exports.TEMP_RESULT_FILE = exports.WORKING_DIR = exports.IQ_CLI_JAR = exports.OUTPUT_SCAN_FILE_PATH = exports.OUTPUT_SARIF_FILE_PATH = exports.OUTPUT_RESULT_FILE_PATH = exports.OUTPUT_SARIF_FILE = exports.OUTPUT_PRIORITIES_URL = exports.OUTPUT_REPORT_URL = exports.OUTPUT_SCAN_ID = exports.REACHABILITY_NAMESPACES = exports.ENABLE_REACHABILITY = exports.CALLFLOW_NAMESPACES = exports.ENABLE_CALLFLOW = exports.INPUT_SARIF_FILE = exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = exports.INPUT_INCLUDE_SHA_256 = exports.INPUT_PROXY_USER = exports.INPUT_PROXY = exports.INPUT_KEEP_SCAN_FILE = exports.INPUT_DEBUG = exports.INPUT_IGNORE_SCANNING_ERRORS = exports.INPUT_IGNORE_SYSTEM_ERRORS = exports.INPUT_FAIL_ON_POLICY_WARNINGS = exports.INPUT_MODULE_EXCLUDE = exports.INPUT_RESULT_FILE = exports.INPUT_STAGE = exports.INPUT_IQ_CLI_VERSION = exports.INPUT_SCAN_TARGETS = exports.INPUT_IQ_SERVER_URL = exports.INPUT_ORGANIZATION_ID = exports.INPUT_APPLICATION_ID = exports.INPUT_PASSWORD = exports.INPUT_USERNAME = void 0;
+exports.API_V2_RESOURCE_PATH = exports.DEFAULT_SARIF_FILE = exports.CLI_PARAMS_FILE = exports.TEMP_RESULT_FILE = exports.WORKING_DIR = exports.IQ_CLI_JAR = exports.OUTPUT_SCAN_FILE_PATH = exports.OUTPUT_SARIF_FILE_PATH = exports.OUTPUT_RESULT_FILE_PATH = exports.OUTPUT_SARIF_FILE = exports.OUTPUT_PRIORITIES_URL = exports.OUTPUT_REPORT_URL = exports.OUTPUT_SCAN_ID = exports.IGNORE_REACHABILITY_ERRORS = exports.REACHABILITY_JS_PROJECT_ROOT = exports.REACHABILITY_NODE_PATH = exports.REACHABILITY_JS_EXCLUDES = exports.REACHABILITY_JS_SOURCES = exports.ENABLE_REACHABILITY_JS = exports.REACHABILITY_ENTRYPOINT_STRATEGY = exports.REACHABILITY_NAMESPACES = exports.ENABLE_REACHABILITY = exports.CALLFLOW_NAMESPACES = exports.ENABLE_CALLFLOW = exports.INPUT_SARIF_FILE = exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = exports.INPUT_INCLUDE_SHA_256 = exports.INPUT_PROXY_USER = exports.INPUT_PROXY = exports.INPUT_KEEP_SCAN_FILE = exports.INPUT_DEBUG = exports.INPUT_IGNORE_SCANNING_ERRORS = exports.INPUT_IGNORE_SYSTEM_ERRORS = exports.INPUT_FAIL_ON_POLICY_WARNINGS = exports.INPUT_MODULE_EXCLUDE = exports.INPUT_RESULT_FILE = exports.INPUT_STAGE = exports.INPUT_IQ_CLI_VERSION = exports.INPUT_SCAN_TARGETS = exports.INPUT_IQ_SERVER_URL = exports.INPUT_ORGANIZATION_ID = exports.INPUT_APPLICATION_ID = exports.INPUT_PASSWORD = exports.INPUT_USERNAME = void 0;
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
@@ -37254,6 +37254,13 @@ exports.ENABLE_CALLFLOW = 'enable-callflow';
 exports.CALLFLOW_NAMESPACES = 'callflow-namespaces';
 exports.ENABLE_REACHABILITY = 'enable-reachability';
 exports.REACHABILITY_NAMESPACES = 'reachability-namespaces';
+exports.REACHABILITY_ENTRYPOINT_STRATEGY = 'reachability-entrypoint-strategy';
+exports.ENABLE_REACHABILITY_JS = 'enable-reachability-js';
+exports.REACHABILITY_JS_SOURCES = 'reachability-js-sources';
+exports.REACHABILITY_JS_EXCLUDES = 'reachability-js-excludes';
+exports.REACHABILITY_NODE_PATH = 'reachability-node-path';
+exports.REACHABILITY_JS_PROJECT_ROOT = 'reachability-js-project-root';
+exports.IGNORE_REACHABILITY_ERRORS = 'ignore-reachability-errors';
 exports.OUTPUT_SCAN_ID = 'scan-id';
 exports.OUTPUT_REPORT_URL = 'report-url';
 exports.OUTPUT_PRIORITIES_URL = 'priorities-url';
@@ -37343,6 +37350,13 @@ function getAndValidateParameters() {
     const callflowNamespaces = core.getInput(constants_1.CALLFLOW_NAMESPACES);
     const enableReachability = core.getBooleanInput(constants_1.ENABLE_REACHABILITY);
     const reachabilityNamespaces = core.getInput(constants_1.REACHABILITY_NAMESPACES);
+    const reachabilityEntrypointStrategy = core.getInput(constants_1.REACHABILITY_ENTRYPOINT_STRATEGY);
+    const enableReachabilityJs = core.getBooleanInput(constants_1.ENABLE_REACHABILITY_JS);
+    const reachabilityJsSources = core.getInput(constants_1.REACHABILITY_JS_SOURCES);
+    const reachabilityJsExcludes = core.getInput(constants_1.REACHABILITY_JS_EXCLUDES);
+    const reachabilityNodePath = core.getInput(constants_1.REACHABILITY_NODE_PATH);
+    const reachabilityJsProjectRoot = core.getInput(constants_1.REACHABILITY_JS_PROJECT_ROOT);
+    const ignoreReachabilityErrors = core.getBooleanInput(constants_1.IGNORE_REACHABILITY_ERRORS);
     const errorMessages = [];
     const missingRequiredFields = [];
     if (!username) {
@@ -37384,6 +37398,12 @@ function getAndValidateParameters() {
             errorMessages.push(`Invalid ${constants_1.INPUT_SARIF_FILE} value: only letters, numbers, underscores, and hyphens are allowed. Extension only .sarif or .json files are allowed.`);
         }
     }
+    // Validate JS reachability configuration
+    if (enableReachabilityJs && !reachabilityJsSources.trim()) {
+        errorMessages.push(`${constants_1.ENABLE_REACHABILITY_JS} is enabled but ${constants_1.REACHABILITY_JS_SOURCES} is not provided. ` +
+            `JavaScript reachability analysis requires source patterns to be specified (e.g., 'src/**/*.js'). ` +
+            `Please provide source patterns or disable JS reachability analysis.`);
+    }
     if (errorMessages.length > 0) {
         throw new Error(errorMessages.join(' '));
     }
@@ -37411,7 +37431,14 @@ function getAndValidateParameters() {
         enableCallflow,
         callflowNamespaces,
         enableReachability,
-        reachabilityNamespaces
+        reachabilityNamespaces,
+        reachabilityEntrypointStrategy,
+        enableReachabilityJs,
+        reachabilityJsSources,
+        reachabilityJsExcludes,
+        reachabilityNodePath,
+        reachabilityJsProjectRoot,
+        ignoreReachabilityErrors
     };
 }
 

@@ -115,6 +115,35 @@ inputs:
       be delimited by space.'
     required: false
     default: ''
+  reachability-entrypoint-strategy:
+    description: 'Entrypoint strategy for Java reachability analysis.'
+    required: false
+  enable-reachability-js:
+    description: 'Enable JavaScript reachability analysis (Default: false)'
+    required: false
+    default: false
+  reachability-js-sources:
+    description:
+      'JavaScript source patterns for reachability analysis (required for JS reachability; these are app files; do not
+      include tests or node_modules files here)'
+    required: false
+    default: ''
+  reachability-js-excludes:
+    description:
+      'JavaScript exclude patterns for reachability analysis (e.g. tests and other source files that are not relevant
+      for the analysis)'
+    required: false
+    default: ''
+  reachability-node-path:
+    description: 'Path to Node.js executable'
+    required: false
+  reachability-js-project-root:
+    description: 'JavaScript project root directory (i.e. where the main package.json file resides)'
+    required: false
+  ignore-reachability-errors:
+    description: 'Ignore reachability analysis errors (reachability analysis failed to run) (Default: false)'
+    required: false
+    default: false
 
 # Define your outputs here.
 outputs:
