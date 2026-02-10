@@ -6160,6 +6160,7 @@ const isSatisfiable = (comparators, options) => {
 // already replaced the hyphen ranges
 // turn into a set of JUST comparators.
 const parseComparator = (comp, options) => {
+  comp = comp.replace(re[t.BUILD], '')
   debug('comp', comp, options)
   comp = replaceCarets(comp, options)
   debug('caret', comp)
@@ -6580,11 +6581,25 @@ class SemVer {
       other = new SemVer(other, this.options)
     }
 
-    return (
-      compareIdentifiers(this.major, other.major) ||
-      compareIdentifiers(this.minor, other.minor) ||
-      compareIdentifiers(this.patch, other.patch)
-    )
+    if (this.major < other.major) {
+      return -1
+    }
+    if (this.major > other.major) {
+      return 1
+    }
+    if (this.minor < other.minor) {
+      return -1
+    }
+    if (this.minor > other.minor) {
+      return 1
+    }
+    if (this.patch < other.patch) {
+      return -1
+    }
+    if (this.patch > other.patch) {
+      return 1
+    }
+    return 0
   }
 
   comparePre (other) {
@@ -7485,6 +7500,10 @@ module.exports = debug
 
 const numeric = /^[0-9]+$/
 const compareIdentifiers = (a, b) => {
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a === b ? 0 : a < b ? -1 : 1
+  }
+
   const anum = numeric.test(a)
   const bnum = numeric.test(b)
 
@@ -42385,7 +42404,7 @@ module.exports = {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IQ_CLI_DOWNLOAD_URL = exports.IQ_CLI_VERSION = exports.LATEST_IQ_CLI_VERSION = exports.MINIMUM_SUPPORTED_IQ_VERSION = exports.DOWNLOAD_URL = exports.IQ_VERSION_TO_COMPLETE = exports.IQ_CLI_JAR = void 0;
+exports.IQ_CLI_DOWNLOAD_AUTH = exports.IQ_CLI_DOWNLOAD_URL = exports.IQ_CLI_VERSION = exports.LATEST_IQ_CLI_VERSION = exports.MINIMUM_SUPPORTED_IQ_VERSION = exports.DOWNLOAD_URL = exports.IQ_VERSION_TO_COMPLETE = exports.IQ_CLI_JAR = void 0;
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
@@ -42395,9 +42414,10 @@ exports.IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 exports.IQ_VERSION_TO_COMPLETE = '1.{iq-cli-version}.0-01';
 exports.DOWNLOAD_URL = 'https://download.sonatype.com/clm/scanner/nexus-iq-cli-{iq-cli-version}.jar';
 exports.MINIMUM_SUPPORTED_IQ_VERSION = 137;
-exports.LATEST_IQ_CLI_VERSION = '2.8.3-01'; // This should be updated to the latest IQ CLI version with each release
+exports.LATEST_IQ_CLI_VERSION = '2.8.5-01'; // This should be updated to the latest IQ CLI version with each release
 exports.IQ_CLI_VERSION = 'iq-cli-version';
 exports.IQ_CLI_DOWNLOAD_URL = 'iq-cli-download-url';
+exports.IQ_CLI_DOWNLOAD_AUTH = 'iq-cli-download-auth';
 
 
 /***/ }),
@@ -42682,12 +42702,18 @@ async function run() {
             else {
                 core.debug(`Downloading IQ CLI version ${iqCliVersion}`);
             }
+            let iqCliUrlAuthBase64;
+            const iqCliUrlAuth = core.getInput(constants_1.IQ_CLI_DOWNLOAD_AUTH);
+            if (iqCliUrlAuth) {
+                iqCliUrlAuthBase64 = Buffer.from(iqCliUrlAuth, 'utf-8').toString('base64');
+            }
+            const authSuffix = iqCliUrlAuthBase64 ? ' (basic authorization)' : '';
             let iqCliPath;
             for (let i = 1; i < 10; i++) {
                 try {
-                    core.debug(`Attempting to download IQ CLI from: ${validatedDownloadUrl}`);
-                    iqCliPath = await tc.downloadTool(validatedDownloadUrl, constants_1.IQ_CLI_JAR);
-                    core.info(`IQ CLI downloaded from: ${validatedDownloadUrl}`);
+                    core.debug(`Attempting to download IQ CLI from: ${validatedDownloadUrl}${authSuffix}`);
+                    iqCliPath = await tc.downloadTool(validatedDownloadUrl, constants_1.IQ_CLI_JAR, iqCliUrlAuthBase64 ? `Basic ${iqCliUrlAuthBase64}` : undefined);
+                    core.info(`IQ CLI downloaded from: ${validatedDownloadUrl}${authSuffix}`);
                     break;
                 }
                 catch (error) {
@@ -43201,7 +43227,7 @@ module.exports = require("util");
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"comment":"SHA1 checksums for IQ CLI JAR files. Update this file when new IQ CLI versions are released.","data":[{"version":"2.8.3-01","sha1":"2f81596f7504622f2dad909b2a4e33a9a883216f"},{"version":"2.8.2-02","sha1":"082a4688f9e620e3aaa62dab821869475fea1648"},{"version":"2.8.1-01","sha1":"4bc23e98981a84409e1fe17e92cbe1ea48198cb9"},{"version":"2.8.0-01","sha1":"918508ac6391be29da2ad6b19f9374469d8e20b4"},{"version":"2.7.0-01","sha1":"c6785d6ebc98fd954a58e6ab4ad4d38134045a6a"},{"version":"2.6.0-01","sha1":"eb7cc18987597eeda4c191fba441a27fac59145f"},{"version":"2.5.1-02","sha1":"c8735ec6c4bd027fe2a94d1b70d64ede99e4134a"},{"version":"2.5.0-01","sha1":"95f92eda83dcca62e5cd9b6b7fd9f7787b829732"},{"version":"2.4.6-01","sha1":"6e12b84ee16d520aa830611bf9d2c4e644deddd5"},{"version":"2.4.5-01","sha1":"b12e481d9be61cd53e20753cdd2a7bc22882ba85"},{"version":"2.4.4-01","sha1":"6384c7d54c5f4382e1e63b53a4af7d47a2a79751"},{"version":"2.4.3-01","sha1":"08ceabfe157e83889c658fd2a18aa881fc98057e"},{"version":"2.4.2-01","sha1":"d1d5639fda9a1a9f04668870e1eed80eff1cc0dd"},{"version":"2.4.1-01","sha1":"5aa0e93d57964f5ed7986148434d141936c88a9b"},{"version":"2.4.0-01","sha1":"cae8a9a2fdaa2d727283552486eaa25873281cf6"},{"version":"2.3.0-02","sha1":"897f7c9091315fabdb410ba446bb5d7342f359e8"},{"version":"2.2.0-01","sha1":"97fac65743479d487a50710825fb96d9cbd71e48"},{"version":"2.1.1-01","sha1":"efa70640e880978d4c5f72bf8aa38e84b7736e62"},{"version":"2.1.0-01","sha1":"98d6e445820b5fdb83901d5dc96d9455ef23a89d"},{"version":"2.0.0-01","sha1":"0df0411a1e8317929d8dd891fb57e76ea07c95d4"},{"version":"1.185.0-01","sha1":"27f6723066951f6dc5c241699f1fac9b4a4f6bad"},{"version":"1.184.0-01","sha1":"dbd2512acedc41287f159cfa8edccbb638b9808d"},{"version":"1.183.0-01","sha1":"81b35f3e617e912bb92e47c2848233f806e0811a"},{"version":"1.182.0-01","sha1":"eda224e42eac7036b4ad5260e31862e66efcc5bd"}]}');
+module.exports = /*#__PURE__*/JSON.parse('{"comment":"SHA1 checksums for IQ CLI JAR files. Update this file when new IQ CLI versions are released.","data":[{"version":"2.8.5-01","sha1":"692094121ab53f6a6c570bd2c1e1d07725b6febd"},{"version":"2.8.4-01","sha1":"bd3a9ecb769a42d3b3df5e35700fb16f2651dad6"},{"version":"2.8.3-01","sha1":"2f81596f7504622f2dad909b2a4e33a9a883216f"},{"version":"2.8.2-02","sha1":"082a4688f9e620e3aaa62dab821869475fea1648"},{"version":"2.8.1-01","sha1":"4bc23e98981a84409e1fe17e92cbe1ea48198cb9"},{"version":"2.8.0-01","sha1":"918508ac6391be29da2ad6b19f9374469d8e20b4"},{"version":"2.7.0-01","sha1":"c6785d6ebc98fd954a58e6ab4ad4d38134045a6a"},{"version":"2.6.0-01","sha1":"eb7cc18987597eeda4c191fba441a27fac59145f"},{"version":"2.5.1-02","sha1":"c8735ec6c4bd027fe2a94d1b70d64ede99e4134a"},{"version":"2.5.0-01","sha1":"95f92eda83dcca62e5cd9b6b7fd9f7787b829732"},{"version":"2.4.6-01","sha1":"6e12b84ee16d520aa830611bf9d2c4e644deddd5"},{"version":"2.4.5-01","sha1":"b12e481d9be61cd53e20753cdd2a7bc22882ba85"},{"version":"2.4.4-01","sha1":"6384c7d54c5f4382e1e63b53a4af7d47a2a79751"},{"version":"2.4.3-01","sha1":"08ceabfe157e83889c658fd2a18aa881fc98057e"},{"version":"2.4.2-01","sha1":"d1d5639fda9a1a9f04668870e1eed80eff1cc0dd"},{"version":"2.4.1-01","sha1":"5aa0e93d57964f5ed7986148434d141936c88a9b"},{"version":"2.4.0-01","sha1":"cae8a9a2fdaa2d727283552486eaa25873281cf6"},{"version":"2.3.0-02","sha1":"897f7c9091315fabdb410ba446bb5d7342f359e8"},{"version":"2.2.0-01","sha1":"97fac65743479d487a50710825fb96d9cbd71e48"},{"version":"2.1.1-01","sha1":"efa70640e880978d4c5f72bf8aa38e84b7736e62"},{"version":"2.1.0-01","sha1":"98d6e445820b5fdb83901d5dc96d9455ef23a89d"},{"version":"2.0.0-01","sha1":"0df0411a1e8317929d8dd891fb57e76ea07c95d4"},{"version":"1.185.0-01","sha1":"27f6723066951f6dc5c241699f1fac9b4a4f6bad"},{"version":"1.184.0-01","sha1":"dbd2512acedc41287f159cfa8edccbb638b9808d"},{"version":"1.183.0-01","sha1":"81b35f3e617e912bb92e47c2848233f806e0811a"},{"version":"1.182.0-01","sha1":"eda224e42eac7036b4ad5260e31862e66efcc5bd"}]}');
 
 /***/ })
 

@@ -30,8 +30,9 @@ jobs:
           iq-cli-version: 1.179.0-01
 ```
 
-Alternatively, instead of providing `iq-cli-version`, you can provide the `iq-cli-download-url` parameter. In this case,
-the Sonatype CLI JAR file will be downloaded from the specified location URL.
+Alternatively, instead of providing `iq-cli-version`, you can provide the `iq-cli-download-url` parameter and optionally
+access credentials via the `iq-cli-download-auth` parameter. In this case, the Sonatype CLI JAR file will be downloaded
+from the specified location URL.
 
 ## Parameters
 
@@ -41,6 +42,9 @@ the Sonatype CLI JAR file will be downloaded from the specified location URL.
 
 > **iq-cli-download-url**\
 > URL from where the IQ CLI jar file will be downloaded. Either this or `iq-cli-version` is required.
+
+> **iq-cli-download-auth**\
+> Credentials for accessing the IQ CLI download URL. Format: `username:password`. Basic authentication is used.
 
 ## Output
 

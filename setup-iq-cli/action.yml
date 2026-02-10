@@ -16,6 +16,9 @@ inputs:
     description:
       'URL from where the IQ CLI jar file will be downloaded. Must be provided if `iq-cli-version` is not specified.'
     required: false
+  iq-cli-download-auth:
+    description: 'Credentials for accessing the IQ CLI download URL. Format: `username:password`.'
+    required: false
 
 # Define your outputs here.
 outputs:
