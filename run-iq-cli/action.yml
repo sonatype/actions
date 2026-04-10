@@ -144,6 +144,11 @@ inputs:
     description: 'Ignore reachability analysis errors (reachability analysis failed to run) (Default: false)'
     required: false
     default: false
+  advanced-properties:
+    description:
+      'Additional system properties to pass to the IQ CLI. Format: one property per line or space-separated (e.g.,
+      "key1=value1 key2=value2"). Multiple properties can be specified.'
+    required: false
 
 # Define your outputs here.
 outputs:
