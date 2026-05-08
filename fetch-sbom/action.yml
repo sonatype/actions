@@ -53,6 +53,6 @@ outputs:
     description: 'The path to the SBOM file to upload as artifact'
 
 runs:
-  using: node20
+  using: node24
   main: dist/main/index.js
   post: dist/cleanup/index.js

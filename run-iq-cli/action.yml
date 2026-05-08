@@ -168,5 +168,5 @@ outputs:
     description: 'The path to the Scan file to upload as artifact'
 
 runs:
-  using: node20
+  using: node24
   main: dist/main/index.js

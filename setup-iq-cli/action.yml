@@ -38,5 +38,5 @@ outputs:
     description: 'Semver valid version of the IQ CLI configured. It can be used as an input parameter for run-iq-cli.'
 
 runs:
-  using: node20
+  using: node24
   main: dist/main/index.js
