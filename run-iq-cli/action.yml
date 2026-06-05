@@ -140,6 +140,23 @@ inputs:
   reachability-js-project-root:
     description: 'JavaScript project root directory (i.e. where the main package.json file resides)'
     required: false
+  enable-reachability-dotnet:
+    description: 'Enable .NET reachability analysis (Default: false)'
+    required: false
+    default: false
+  reachability-dotnet-namespaces:
+    description:
+      'Namespace prefixes to scope entry points for .NET reachability analysis. Multiple namespaces can be delimited by
+      space.'
+    required: false
+    default: ''
+  reachability-dotnet-entrypoint-strategy:
+    description: 'Entrypoint strategy for .NET reachability analysis.'
+    required: false
+  reachability-dotnet-path:
+    description:
+      'Absolute path to the dotnet executable. When not specified, assumes dotnet is available on the system PATH.'
+    required: false
   ignore-reachability-errors:
     description: 'Ignore reachability analysis errors (reachability analysis failed to run) (Default: false)'
     required: false

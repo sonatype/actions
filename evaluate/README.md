@@ -162,6 +162,10 @@ jobs:
 > **ignore-reachability-errors**\
 > Ignore reachability analysis errors (reachability analysis failed to run). Default: `false`. `Optional`
 
+> **skip-java-setup**\
+> Skip the automatic Java setup step. Use this when Java is already available in the runner environment or when you need
+> to provide Java through your own approved mechanism. Default: `false`. `Optional`
+
 ## Output
 
 > **scan-id**\

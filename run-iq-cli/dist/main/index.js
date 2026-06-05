@@ -145111,6 +145111,21 @@ class CliCommandBuilder {
                 this.pushParameterAndValue(params, '-res', this.parameters.reachabilityEntrypointStrategy);
             }
         }
+        if (this.parameters.enableReachabilityDotNet) {
+            this.pushParameterAndValue(params, '-radn');
+            if (this.parameters.reachabilityDotNetNamespaces && '' !== this.parameters.reachabilityDotNetNamespaces.trim()) {
+                const namespaces = this.parameters.reachabilityDotNetNamespaces.trim().split(spaces);
+                for (const namespace of namespaces) {
+                    this.pushParameterAndValue(params, '-rndn', namespace.trim());
+                }
+            }
+            if (this.parameters.reachabilityDotNetEntrypointStrategy) {
+                this.pushParameterAndValue(params, '-resdn', this.parameters.reachabilityDotNetEntrypointStrategy);
+            }
+            if (this.parameters.reachabilityDotNetPath) {
+                this.pushParameterAndValue(params, '-rdnp', this.parameters.reachabilityDotNetPath);
+            }
+        }
         if (this.parameters.enableReachabilityJs) {
             this.pushParameterAndValue(params, '-rajs');
             if (this.parameters.reachabilityJsSources && '' !== this.parameters.reachabilityJsSources.trim()) {
@@ -145173,7 +145188,7 @@ exports["default"] = CliCommandBuilder;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.API_V2_RESOURCE_PATH = exports.DEFAULT_SARIF_FILE = exports.CLI_PARAMS_FILE = exports.TEMP_RESULT_FILE = exports.WORKING_DIR = exports.IQ_CLI_JAR = exports.OUTPUT_SCAN_FILE_PATH = exports.OUTPUT_SARIF_FILE_PATH = exports.OUTPUT_RESULT_FILE_PATH = exports.OUTPUT_SARIF_FILE = exports.OUTPUT_PRIORITIES_URL = exports.OUTPUT_REPORT_URL = exports.OUTPUT_SCAN_ID = exports.INPUT_ADVANCED_PROPERTIES = exports.IGNORE_REACHABILITY_ERRORS = exports.REACHABILITY_JS_PROJECT_ROOT = exports.REACHABILITY_NODE_PATH = exports.REACHABILITY_JS_EXCLUDES = exports.REACHABILITY_JS_SOURCES = exports.ENABLE_REACHABILITY_JS = exports.REACHABILITY_ENTRYPOINT_STRATEGY = exports.REACHABILITY_NAMESPACES = exports.ENABLE_REACHABILITY = exports.CALLFLOW_NAMESPACES = exports.ENABLE_CALLFLOW = exports.INPUT_SARIF_FILE = exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = exports.INPUT_INCLUDE_SHA_256 = exports.INPUT_PROXY_USER = exports.INPUT_PROXY = exports.INPUT_KEEP_SCAN_FILE = exports.INPUT_DEBUG = exports.INPUT_IGNORE_SCANNING_ERRORS = exports.INPUT_IGNORE_SYSTEM_ERRORS = exports.INPUT_FAIL_ON_POLICY_WARNINGS = exports.INPUT_MODULE_EXCLUDE = exports.INPUT_RESULT_FILE = exports.INPUT_STAGE = exports.INPUT_IQ_CLI_VERSION = exports.INPUT_SCAN_TARGETS = exports.INPUT_IQ_SERVER_URL = exports.INPUT_ORGANIZATION_ID = exports.INPUT_APPLICATION_ID = exports.INPUT_PASSWORD = exports.INPUT_USERNAME = void 0;
+exports.API_V2_RESOURCE_PATH = exports.DEFAULT_SARIF_FILE = exports.CLI_PARAMS_FILE = exports.TEMP_RESULT_FILE = exports.WORKING_DIR = exports.IQ_CLI_JAR = exports.OUTPUT_SCAN_FILE_PATH = exports.OUTPUT_SARIF_FILE_PATH = exports.OUTPUT_RESULT_FILE_PATH = exports.OUTPUT_SARIF_FILE = exports.OUTPUT_PRIORITIES_URL = exports.OUTPUT_REPORT_URL = exports.OUTPUT_SCAN_ID = exports.INPUT_ADVANCED_PROPERTIES = exports.IGNORE_REACHABILITY_ERRORS = exports.REACHABILITY_DOTNET_PATH = exports.REACHABILITY_DOTNET_ENTRYPOINT_STRATEGY = exports.REACHABILITY_DOTNET_NAMESPACES = exports.ENABLE_REACHABILITY_DOTNET = exports.REACHABILITY_JS_PROJECT_ROOT = exports.REACHABILITY_NODE_PATH = exports.REACHABILITY_JS_EXCLUDES = exports.REACHABILITY_JS_SOURCES = exports.ENABLE_REACHABILITY_JS = exports.REACHABILITY_ENTRYPOINT_STRATEGY = exports.REACHABILITY_NAMESPACES = exports.ENABLE_REACHABILITY = exports.CALLFLOW_NAMESPACES = exports.ENABLE_CALLFLOW = exports.INPUT_SARIF_FILE = exports.INPUT_EXCLUDE_MAVEN_DEPENDENCY_MANAGEMENT = exports.INPUT_INCLUDE_SHA_256 = exports.INPUT_PROXY_USER = exports.INPUT_PROXY = exports.INPUT_KEEP_SCAN_FILE = exports.INPUT_DEBUG = exports.INPUT_IGNORE_SCANNING_ERRORS = exports.INPUT_IGNORE_SYSTEM_ERRORS = exports.INPUT_FAIL_ON_POLICY_WARNINGS = exports.INPUT_MODULE_EXCLUDE = exports.INPUT_RESULT_FILE = exports.INPUT_STAGE = exports.INPUT_IQ_CLI_VERSION = exports.INPUT_SCAN_TARGETS = exports.INPUT_IQ_SERVER_URL = exports.INPUT_ORGANIZATION_ID = exports.INPUT_APPLICATION_ID = exports.INPUT_PASSWORD = exports.INPUT_USERNAME = void 0;
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
@@ -145209,6 +145224,10 @@ exports.REACHABILITY_JS_SOURCES = 'reachability-js-sources';
 exports.REACHABILITY_JS_EXCLUDES = 'reachability-js-excludes';
 exports.REACHABILITY_NODE_PATH = 'reachability-node-path';
 exports.REACHABILITY_JS_PROJECT_ROOT = 'reachability-js-project-root';
+exports.ENABLE_REACHABILITY_DOTNET = 'enable-reachability-dotnet';
+exports.REACHABILITY_DOTNET_NAMESPACES = 'reachability-dotnet-namespaces';
+exports.REACHABILITY_DOTNET_ENTRYPOINT_STRATEGY = 'reachability-dotnet-entrypoint-strategy';
+exports.REACHABILITY_DOTNET_PATH = 'reachability-dotnet-path';
 exports.IGNORE_REACHABILITY_ERRORS = 'ignore-reachability-errors';
 exports.INPUT_ADVANCED_PROPERTIES = 'advanced-properties';
 exports.OUTPUT_SCAN_ID = 'scan-id';
@@ -145307,6 +145326,10 @@ function getAndValidateBasicParameters() {
     const reachabilityJsExcludes = core.getInput(constants_1.REACHABILITY_JS_EXCLUDES);
     const reachabilityNodePath = core.getInput(constants_1.REACHABILITY_NODE_PATH);
     const reachabilityJsProjectRoot = core.getInput(constants_1.REACHABILITY_JS_PROJECT_ROOT);
+    const enableReachabilityDotNet = core.getBooleanInput(constants_1.ENABLE_REACHABILITY_DOTNET);
+    const reachabilityDotNetNamespaces = core.getInput(constants_1.REACHABILITY_DOTNET_NAMESPACES);
+    const reachabilityDotNetEntrypointStrategy = core.getInput(constants_1.REACHABILITY_DOTNET_ENTRYPOINT_STRATEGY);
+    const reachabilityDotNetPath = core.getInput(constants_1.REACHABILITY_DOTNET_PATH);
     const ignoreReachabilityErrors = core.getBooleanInput(constants_1.IGNORE_REACHABILITY_ERRORS);
     const advancedProperties = core.getInput(constants_1.INPUT_ADVANCED_PROPERTIES);
     const missingRequiredFields = [];
@@ -145370,6 +145393,10 @@ function getAndValidateBasicParameters() {
         reachabilityJsExcludes,
         reachabilityNodePath,
         reachabilityJsProjectRoot,
+        enableReachabilityDotNet,
+        reachabilityDotNetNamespaces,
+        reachabilityDotNetEntrypointStrategy,
+        reachabilityDotNetPath,
         ignoreReachabilityErrors,
         advancedProperties
     };
@@ -145952,6 +145979,7 @@ class RunConfigurationLogger extends actions_common_1.BaseConfigurationLogger {
         core.info('   Reachability analysis:');
         this.logJavaAnalysisConfig();
         this.logJsAnalysisConfig();
+        this.logDotNetAnalysisConfig();
         if (this.configuration.ignoreReachabilityErrors !== undefined) {
             const src = this.resolveSource('reachability.failOnError');
             core.info(`   Fail build on reachability analysis errors: ${!this.configuration.ignoreReachabilityErrors}   (${src})`);
@@ -145977,14 +146005,27 @@ class RunConfigurationLogger extends actions_common_1.BaseConfigurationLogger {
         this.maybeLog('      Project directory', this.configuration.reachabilityJsProjectRoot, 'reachability.javaScriptAnalysis.projectRoot');
         this.maybeLog('      Node Js executable path', this.configuration.reachabilityNodePath, 'reachability.javaScriptAnalysis.nodeJsExecutable');
     }
+    logDotNetAnalysisConfig() {
+        if (!this.isDotNetReachabilityEnabled()) {
+            return;
+        }
+        core.info('      .NET analysis:');
+        this.maybeLog('      Enabled', this.configuration.enableReachabilityDotNet, 'reachability.dotNetAnalysis.enabled');
+        this.maybeLog('      Entrypoint strategy', this.configuration.reachabilityDotNetEntrypointStrategy, 'reachability.dotNetAnalysis.entrypointStrategy');
+        this.maybeLog('      Namespaces', this.configuration.reachabilityDotNetNamespaces, 'reachability.dotNetAnalysis.namespaces');
+        this.maybeLog('      Dotnet executable path', this.configuration.reachabilityDotNetPath, 'reachability.dotNetAnalysis.dotnetPath');
+    }
     isReachabilityEnabled() {
-        return this.isJavaReachabilityEnabled() || this.isJsReachabilityEnabled();
+        return this.isJavaReachabilityEnabled() || this.isJsReachabilityEnabled() || this.isDotNetReachabilityEnabled();
     }
     isJavaReachabilityEnabled() {
         return this.configuration.enableReachability === true;
     }
     isJsReachabilityEnabled() {
         return this.configuration.enableReachabilityJs === true;
+    }
+    isDotNetReachabilityEnabled() {
+        return this.configuration.enableReachabilityDotNet === true;
     }
 }
 exports["default"] = RunConfigurationLogger;
@@ -146074,6 +146115,10 @@ class RunConfigurationResolver extends actions_common_1.BaseConfigurationResolve
         this.copyString(taskParameters.reachabilityJsExcludes, configuration, 'reachabilityJsExcludes', 'reachability.javaScriptAnalysis.jsExcludes');
         this.copyString(taskParameters.reachabilityNodePath, configuration, 'reachabilityNodePath', 'reachability.javaScriptAnalysis.nodeJsExecutable');
         this.copyString(taskParameters.reachabilityJsProjectRoot, configuration, 'reachabilityJsProjectRoot', 'reachability.javaScriptAnalysis.projectRoot');
+        this.copyBoolean(taskParameters.enableReachabilityDotNet, configuration, 'enableReachabilityDotNet', 'reachability.dotNetAnalysis.enabled');
+        this.copyString(taskParameters.reachabilityDotNetNamespaces, configuration, 'reachabilityDotNetNamespaces', 'reachability.dotNetAnalysis.namespaces');
+        this.copyString(taskParameters.reachabilityDotNetEntrypointStrategy, configuration, 'reachabilityDotNetEntrypointStrategy', 'reachability.dotNetAnalysis.entrypointStrategy');
+        this.copyString(taskParameters.reachabilityDotNetPath, configuration, 'reachabilityDotNetPath', 'reachability.dotNetAnalysis.dotnetPath');
     }
     copyNonEmptyApiReachabilityConfig(source, configuration) {
         if (source === undefined || source === null) {
@@ -146098,6 +146143,15 @@ class RunConfigurationResolver extends actions_common_1.BaseConfigurationResolve
             }
             this.copyString(jsAnalysis.nodeJsExecutable, configuration, 'reachabilityNodePath');
             this.copyString(jsAnalysis.projectRoot, configuration, 'reachabilityJsProjectRoot');
+        }
+        const dotNetAnalysis = source.dotNetAnalysis;
+        if (dotNetAnalysis != null) {
+            this.copyBoolean(dotNetAnalysis.enabled, configuration, 'enableReachabilityDotNet');
+            if (dotNetAnalysis.namespaces && dotNetAnalysis.namespaces.length > 0) {
+                configuration.reachabilityDotNetNamespaces = dotNetAnalysis.namespaces.join(' ');
+            }
+            this.copyString(dotNetAnalysis.entrypointStrategy, configuration, 'reachabilityDotNetEntrypointStrategy');
+            this.copyString(dotNetAnalysis.dotnetPath, configuration, 'reachabilityDotNetPath');
         }
         if (source.failOnError !== undefined && !source.failOnError) {
             configuration.ignoreReachabilityErrors = true;
@@ -187922,7 +187976,7 @@ function expand_(str, max, isTop) {
             }
             const pad = n.some(isPadded);
             N = [];
-            for (let i = x; test(i, y); i += incr) {
+            for (let i = x; test(i, y) && N.length < max; i += incr) {
                 let c;
                 if (isAlphaSequence) {
                     c = String.fromCharCode(i);
@@ -188314,7 +188368,7 @@ module.exports = /*#__PURE__*/JSON.parse('{"name":"@actions/artifact","version":
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"name":"run-iq-cli","description":"GitHub Action to run IQ cli","version":"1.11.1","author":"sonatype","private":true,"homepage":"https://github.com/sonatype/actions/run-iq-cli","repository":{"type":"git","url":"git+https://github.com/sonatype/actions/run-iq-cli.git"},"bugs":{"url":"https://github.com/sonatype/actions/run-iq-cli/issues"},"keywords":["actions","node","setup"],"exports":{".":"./dist/index.js"},"engines":{"node":">=24"},"scripts":{"bundle":"npm run format:write && npm run package","ci-test":"npx jest","coverage":"npx make-coverage-badge --output-path ./badges/coverage.svg","format:write":"npx prettier --config ../.prettierrc.json --ignore-path ../.prettierignore --write .","format:check":"npx prettier --config ../.prettierrc.json --ignore-path ../.prettierignore --check .","lint":"npx eslint src __tests__ -c ../.eslintrc.yml","package":"npx ncc build src/index.ts -o dist/main --license licenses.txt","package:watch":"npm run package -- --watch","test":"npx jest","all":"npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"},"license":"SEE LICENSE IN LICENSE","jest":{"preset":"ts-jest","verbose":true,"clearMocks":true,"testEnvironment":"node","moduleFileExtensions":["js","ts"],"testMatch":["**/*.test.ts"],"testPathIgnorePatterns":["/node_modules/","/dist/"],"transform":{"^.+\\\\.ts$":"ts-jest"},"coverageReporters":["json-summary","text","lcov"],"collectCoverage":true,"collectCoverageFrom":["./src/**"],"reporters":["default",["jest-junit",{"suiteName":"run-iq-cli unit tests","titleTemplate":"{title}","outputName":"run-iq-cli-test-results.xml","ancestorSeparator":" > "}]]},"dependencies":{"@sonatype/actions-common":"*","@actions/artifact":"^2.3.2","@actions/exec":"^1.1.1","glob":"^13.0.6","@actions/tool-cache":"^2.0.2","semver":"^7.7.1"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"name":"run-iq-cli","description":"GitHub Action to run IQ cli","version":"1.12.0","author":"sonatype","private":true,"homepage":"https://github.com/sonatype/actions/run-iq-cli","repository":{"type":"git","url":"git+https://github.com/sonatype/actions/run-iq-cli.git"},"bugs":{"url":"https://github.com/sonatype/actions/run-iq-cli/issues"},"keywords":["actions","node","setup"],"exports":{".":"./dist/index.js"},"engines":{"node":">=24"},"scripts":{"bundle":"npm run format:write && npm run package","ci-test":"npx jest","coverage":"npx make-coverage-badge --output-path ./badges/coverage.svg","format:write":"npx prettier --config ../.prettierrc.json --ignore-path ../.prettierignore --write .","format:check":"npx prettier --config ../.prettierrc.json --ignore-path ../.prettierignore --check .","lint":"npx eslint src __tests__ -c ../.eslintrc.yml","package":"npx ncc build src/index.ts -o dist/main --license licenses.txt","package:watch":"npm run package -- --watch","test":"npx jest","all":"npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"},"license":"SEE LICENSE IN LICENSE","jest":{"preset":"ts-jest","verbose":true,"clearMocks":true,"testEnvironment":"node","moduleFileExtensions":["js","ts"],"testMatch":["**/*.test.ts"],"testPathIgnorePatterns":["/node_modules/","/dist/"],"transform":{"^.+\\\\.ts$":"ts-jest"},"coverageReporters":["json-summary","text","lcov"],"collectCoverage":true,"collectCoverageFrom":["./src/**"],"reporters":["default",["jest-junit",{"suiteName":"run-iq-cli unit tests","titleTemplate":"{title}","outputName":"run-iq-cli-test-results.xml","ancestorSeparator":" > "}]]},"dependencies":{"@sonatype/actions-common":"*","@actions/artifact":"^2.3.2","@actions/exec":"^1.1.1","glob":"^13.0.6","@actions/tool-cache":"^2.0.2","semver":"^7.7.1"}}');
 
 /***/ })
 

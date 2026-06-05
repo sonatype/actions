@@ -53,6 +53,36 @@ jobs:
           scan-targets: target/*.jar
 ```
 
+## .NET Reachability Usage Example
+
+### Prerequisites
+
+* .NET 8 SDK or runtime installed on the runner
+
+```yaml
+    - name: Run Sonatype CLI with .NET Reachability
+      uses: sonatype/actions/run-iq-cli@v1
+      with:
+        iq-server-url: https://your.lifecycle.server
+        username: ${{ secrets.LIFECYCLE_USERNAME }}
+        password: ${{ secrets.LIFECYCLE_PASSWORD }}
+        application-id: my-dotnet-app
+        scan-targets: ./publish
+        enable-reachability-dotnet: true
+        reachability-dotnet-namespaces: MyCompany.App MyCompany.Core
+        reachability-dotnet-entrypoint-strategy: DOTNET_MAIN
+```
+
+### Choosing an Entrypoint Strategy
+
+| Strategy | Use Case |
+|----------|----------|
+| `DOTNET_MAIN` | Console applications with a `Main` method entry point |
+| `CONCRETE` | ASP.NET applications or apps with well-defined entry points |
+| `PUBLIC_CONCRETE` | Class libraries where public methods are the entry points |
+| `ACCESSIBLE_CONCRETE` | Libraries with broader access patterns |
+| `ALL` | Comprehensive analysis covering all possible entry points |
+
 ## Parameters
 
 > **iq-server-url**\
@@ -158,6 +188,22 @@ jobs:
 > **reachability-js-project-root**\
 > JavaScript project root directory (i.e. where the main package.json file resides). `Optional`
 
+> **enable-reachability-dotnet**\
+> Enable .NET reachability analysis. Requires .NET 8 SDK or runtime to be available on the runner. Default: `false`.
+> `Optional`
+
+> **reachability-dotnet-namespaces**\
+> Namespace prefixes to scope entry points for .NET reachability analysis. Multiple namespaces can be delimited by
+> space. Default: `empty`. `Optional`
+
+> **reachability-dotnet-entrypoint-strategy**\
+> Entrypoint strategy for .NET reachability analysis. `Optional`
+
+> **reachability-dotnet-path**\
+> Absolute path to the dotnet executable. When not specified, assumes `dotnet` is available on the system PATH. This
+> value maps to bomxray's `dotnet-path` configuration property. Use this when the .NET SDK is installed in a
+> non-standard location. `Optional`
+
 > **ignore-reachability-errors**\
 > Ignore reachability analysis errors (reachability analysis failed to run). Default: `false`. `Optional`
 
@@ -174,3 +220,50 @@ jobs:
 
 > **sarif-file**\
 > Name of the generated SARIF file containing all found vulnerabilities, if configured.
+
+## Troubleshooting .NET Reachability
+
+### .NET 8 runtime not found on PATH
+
+**Symptom:** The analysis fails with an error indicating that the `dotnet` command cannot be found.
+
+**Solution:** Either install .NET 8 SDK using the `actions/setup-dotnet@v4` action (recommended), or provide the
+absolute path to the `dotnet` executable via the `reachability-dotnet-path` input:
+
+```yaml
+- name: Run Sonatype CLI
+  uses: sonatype/actions/run-iq-cli@v1
+  with:
+    # ...other inputs...
+    enable-reachability-dotnet: true
+    reachability-dotnet-path: /usr/share/dotnet/dotnet
+```
+
+### No .NET assemblies found
+
+**Symptom:** The analysis completes but reports no reachability data, or warns that no assemblies were found.
+
+**Solution:** Ensure your .NET project is built or published before running the scan. The reachability analysis
+operates on compiled assemblies (`.dll` files), not source code. Add a build step before the scan:
+
+```yaml
+- name: Build .NET project
+  run: dotnet publish -c Release -o ./publish
+```
+
+### Parser timeout for large solutions
+
+**Symptom:** The analysis times out or takes an excessively long time for large .NET solutions.
+
+**Solution:** Narrow the scope of the analysis using `reachability-dotnet-namespaces` to limit analysis to your
+application's namespaces, and choose an appropriate entrypoint strategy to reduce the number of entry points analyzed:
+
+```yaml
+- name: Run Sonatype CLI
+  uses: sonatype/actions/run-iq-cli@v1
+  with:
+    # ...other inputs...
+    enable-reachability-dotnet: true
+    reachability-dotnet-namespaces: MyCompany.MyApp
+    reachability-dotnet-entrypoint-strategy: DOTNET_MAIN
+```

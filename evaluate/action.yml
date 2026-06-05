@@ -145,6 +145,23 @@ inputs:
   reachability-js-project-root:
     description: 'JavaScript project root directory (i.e. where the main package.json file resides)'
     required: false
+  enable-reachability-dotnet:
+    description: 'Enable .NET reachability analysis (Default: false)'
+    required: false
+    default: false
+  reachability-dotnet-namespaces:
+    description:
+      'Namespace prefixes to scope entry points for .NET reachability analysis. Multiple namespaces can be delimited by
+      space.'
+    required: false
+    default: ''
+  reachability-dotnet-entrypoint-strategy:
+    description: 'Entrypoint strategy for .NET reachability analysis.'
+    required: false
+  reachability-dotnet-path:
+    description:
+      'Absolute path to the dotnet executable. When not specified, assumes dotnet is available on the system PATH.'
+    required: false
   ignore-reachability-errors:
     description: 'Ignore reachability analysis errors (reachability analysis failed to run) (Default: false)'
     required: false
@@ -154,6 +171,12 @@ inputs:
       'Additional system properties to pass to the IQ CLI. Format: one property per line or space-separated (e.g.,
       "key1=value1 key2=value2"). Multiple properties can be specified.'
     required: false
+  skip-java-setup:
+    description:
+      'Skip the automatic Java setup step. Use this when Java is already available in the runner environment or when you
+      need to provide Java through your own approved mechanism.'
+    required: false
+    default: false
 
 # Define your outputs here.
 outputs:
@@ -176,18 +199,19 @@ runs:
   steps:
     - name: Setup IQ CLI Action
       id: setup-iq-cli
-      uses: sonatype/actions/setup-iq-cli@v1.11.1
+      uses: sonatype/actions/setup-iq-cli@v1.12.0
       with:
         iq-cli-version: 'latest'
 
     - uses: actions/setup-java@v4
+      if: inputs.skip-java-setup != 'true'
       with:
         distribution: 'temurin'
         java-version: '17'
 
     - name: Run IQ CLI Action
       id: run-iq-cli
-      uses: sonatype/actions/run-iq-cli@v1.11.1
+      uses: sonatype/actions/run-iq-cli@v1.12.0
       with:
         iq-cli-version: ${{ steps.setup-iq-cli.outputs.iq-cli-version }}
         username: ${{ inputs.username }}
@@ -219,6 +243,10 @@ runs:
         reachability-js-excludes: ${{ inputs.reachability-js-excludes }}
         reachability-node-path: ${{ inputs.reachability-node-path }}
         reachability-js-project-root: ${{ inputs.reachability-js-project-root }}
+        enable-reachability-dotnet: ${{ inputs.enable-reachability-dotnet }}
+        reachability-dotnet-namespaces: ${{ inputs.reachability-dotnet-namespaces }}
+        reachability-dotnet-entrypoint-strategy: ${{ inputs.reachability-dotnet-entrypoint-strategy }}
+        reachability-dotnet-path: ${{ inputs.reachability-dotnet-path }}
         ignore-reachability-errors: ${{ inputs.ignore-reachability-errors }}
         advanced-properties: ${{ inputs.advanced-properties }}
 
