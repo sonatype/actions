@@ -6003,6 +6003,9 @@ class Range {
   }
 
   parseRange (range) {
+    // strip build metadata so it can't bleed into the version
+    range = range.replace(BUILDSTRIPRE, '')
+
     // memoize range parsing for performance.
     // this is a very hot path, and fully deterministic.
     const memoOpts =
@@ -6128,12 +6131,16 @@ const debug = __nccwpck_require__(7137)
 const SemVer = __nccwpck_require__(5573)
 const {
   safeRe: re,
+  src,
   t,
   comparatorTrimReplace,
   tildeTrimReplace,
   caretTrimReplace,
 } = __nccwpck_require__(8105)
 const { FLAG_INCLUDE_PRERELEASE, FLAG_LOOSE } = __nccwpck_require__(2311)
+
+// unbounded global build-metadata stripper used by parseRange
+const BUILDSTRIPRE = new RegExp(src[t.BUILD], 'g')
 
 const isNullSet = c => c.value === '<0.0.0-0'
 const isAny = c => c.value === ''
@@ -6175,6 +6182,11 @@ const parseComparator = (comp, options) => {
 
 const isX = id => !id || id.toLowerCase() === 'x' || id === '*'
 
+const invalidXRangeOrder = (M, m, p) => (
+  (isX(M) && !isX(m)) ||
+  (isX(m) && p && !isX(p))
+)
+
 // ~, ~> --> * (any, kinda silly)
 // ~2, ~2.x, ~2.x.x, ~>2, ~>2.x ~>2.x.x --> >=2.0.0 <3.0.0-0
 // ~2.0, ~2.0.x, ~>2.0, ~>2.0.x --> >=2.0.0 <2.1.0-0
@@ -6192,6 +6204,10 @@ const replaceTildes = (comp, options) => {
 
 const replaceTilde = (comp, options) => {
   const r = options.loose ? re[t.TILDELOOSE] : re[t.TILDE]
+  // if we're including prereleases in the match, then the lower bound is
+  // -0, the lowest possible prerelease value, just like x-ranges and carets.
+  // this keeps `~1.2` equivalent to the `1.2.x` x-range it's documented as.
+  const z = options.includePrerelease ? '-0' : ''
   return comp.replace(r, (_, M, m, p, pr) => {
     debug('tilde', comp, _, M, m, p, pr)
     let ret
@@ -6199,10 +6215,10 @@ const replaceTilde = (comp, options) => {
     if (isX(M)) {
       ret = ''
     } else if (isX(m)) {
-      ret = `>=${M}.0.0 <${+M + 1}.0.0-0`
+      ret = `>=${M}.0.0${z} <${+M + 1}.0.0-0`
     } else if (isX(p)) {
       // ~1.2 == >=1.2.0 <1.3.0-0
-      ret = `>=${M}.${m}.0 <${M}.${+m + 1}.0-0`
+      ret = `>=${M}.${m}.0${z} <${M}.${+m + 1}.0-0`
     } else if (pr) {
       debug('replaceTilde pr', pr)
       ret = `>=${M}.${m}.${p}-${pr
@@ -6271,10 +6287,10 @@ const replaceCaret = (comp, options) => {
       if (M === '0') {
         if (m === '0') {
           ret = `>=${M}.${m}.${p
-          }${z} <${M}.${m}.${+p + 1}-0`
+          } <${M}.${m}.${+p + 1}-0`
         } else {
           ret = `>=${M}.${m}.${p
-          }${z} <${M}.${+m + 1}.0-0`
+          } <${M}.${+m + 1}.0-0`
         }
       } else {
         ret = `>=${M}.${m}.${p
@@ -6300,6 +6316,10 @@ const replaceXRange = (comp, options) => {
   const r = options.loose ? re[t.XRANGELOOSE] : re[t.XRANGE]
   return comp.replace(r, (ret, gtlt, M, m, p, pr) => {
     debug('xRange', comp, ret, gtlt, M, m, p, pr)
+    if (invalidXRangeOrder(M, m, p)) {
+      return comp
+    }
+
     const xM = isX(M)
     const xm = xM || isX(m)
     const xp = xm || isX(p)
@@ -6476,6 +6496,22 @@ const { safeRe: re, t } = __nccwpck_require__(8105)
 
 const parseOptions = __nccwpck_require__(9302)
 const { compareIdentifiers } = __nccwpck_require__(1198)
+
+const isPrereleaseIdentifier = (prerelease, identifier) => {
+  const identifiers = identifier.split('.')
+  if (identifiers.length > prerelease.length) {
+    return false
+  }
+
+  for (let i = 0; i < identifiers.length; i++) {
+    if (compareIdentifiers(prerelease[i], identifiers[i]) !== 0) {
+      return false
+    }
+  }
+
+  return true
+}
+
 class SemVer {
   constructor (version, options) {
     options = parseOptions(options)
@@ -6779,8 +6815,9 @@ class SemVer {
           if (identifierBase === false) {
             prerelease = [identifier]
           }
-          if (compareIdentifiers(this.prerelease[0], identifier) === 0) {
-            if (isNaN(this.prerelease[1])) {
+          if (isPrereleaseIdentifier(this.prerelease, identifier)) {
+            const prereleaseBase = this.prerelease[identifier.split('.').length]
+            if (isNaN(prereleaseBase)) {
               this.prerelease = prerelease
             }
           } else {
@@ -8405,7 +8442,7 @@ const simpleSubset = (sub, dom, options) => {
         if (higher === c && higher !== gt) {
           return false
         }
-      } else if (gt.operator === '>=' && !satisfies(gt.semver, String(c), options)) {
+      } else if (gt.operator === '>=' && !c.test(gt.semver)) {
         return false
       }
     }
@@ -8423,7 +8460,7 @@ const simpleSubset = (sub, dom, options) => {
         if (lower === c && lower !== lt) {
           return false
         }
-      } else if (lt.operator === '<=' && !satisfies(lt.semver, String(c), options)) {
+      } else if (lt.operator === '<=' && !c.test(lt.semver)) {
         return false
       }
     }
@@ -9515,7 +9552,7 @@ class RequestHandler extends AsyncResource {
         throw new InvalidArgumentError('invalid callback')
       }
 
-      if (highWaterMark && (typeof highWaterMark !== 'number' || highWaterMark < 0)) {
+      if (highWaterMark != null && (!Number.isFinite(highWaterMark) || highWaterMark < 0)) {
         throw new InvalidArgumentError('invalid highWaterMark')
       }
 
@@ -11113,7 +11150,7 @@ module.exports = class SqliteCacheStore {
           SELECT
             id
           FROM cacheInterceptorV${VERSION}
-          ORDER BY cachedAt DESC
+          ORDER BY cachedAt ASC
           LIMIT ?
         )
       `)
@@ -11180,7 +11217,6 @@ module.exports = class SqliteCacheStore {
         existingValue.id
       )
     } else {
-      this.#prune()
       // New response, let's insert it
       this.#insertValueQuery.run(
         url,
@@ -11196,6 +11232,7 @@ module.exports = class SqliteCacheStore {
         value.cachedAt,
         value.staleAt
       )
+      this.#prune()
     }
   }
 
@@ -11306,7 +11343,7 @@ module.exports = class SqliteCacheStore {
     const now = Date.now()
     for (const value of values) {
       if (now >= value.deleteAt && !canBeExpired) {
-        return undefined
+        continue
       }
 
       let matches = true
@@ -11402,6 +11439,22 @@ const SessionCache = class WeakSessionCache {
   set (sessionKey, session) {
     if (this._maxCachedSessions === 0) {
       return
+    }
+
+    if (this._sessionCache.has(sessionKey)) {
+      this._sessionCache.delete(sessionKey)
+    } else if (this._sessionCache.size >= this._maxCachedSessions) {
+      for (const [key, ref] of this._sessionCache) {
+        if (ref.deref() === undefined) {
+          this._sessionCache.delete(key)
+          return
+        }
+      }
+
+      const oldest = this._sessionCache.keys().next()
+      if (!oldest.done) {
+        this._sessionCache.delete(oldest.value)
+      }
     }
 
     this._sessionCache.set(sessionKey, new WeakRef(session))
@@ -11839,10 +11892,12 @@ function trackWebSocketEvents (debugLog = websocketDebuglog) {
 
   diagnosticsChannel.subscribe('undici:websocket:open',
     evt => {
-      const {
-        address: { address, port }
-      } = evt
-      debugLog('connection opened %s%s', address, port ? `:${port}` : '')
+      if (evt.address != null) {
+        const { address, port } = evt.address
+        debugLog('connection opened %s%s', address, port ? `:${port}` : '')
+      } else {
+        debugLog('connection opened')
+      }
     })
 
   diagnosticsChannel.subscribe('undici:websocket:close',
@@ -12407,6 +12462,21 @@ const { headerNameLowerCasedRecord } = __nccwpck_require__(1045)
 // Verifies that a given path is valid does not contain control chars \x00 to \x20
 const invalidPathRegex = /[^\u0021-\u00ff]/
 
+function isValidContentLengthHeaderValue (val) {
+  if (typeof val !== 'string' || val.length === 0) {
+    return false
+  }
+
+  for (let i = 0; i < val.length; i++) {
+    const charCode = val.charCodeAt(i)
+    if (charCode < 48 || charCode > 57) {
+      return false
+    }
+  }
+
+  return true
+}
+
 const kHandler = Symbol('handler')
 
 class Request {
@@ -12782,23 +12852,31 @@ function processHeader (request, key, val) {
     if (request.contentLength !== null) {
       throw new InvalidArgumentError('duplicate content-length header')
     }
-    request.contentLength = parseInt(val, 10)
-    if (!Number.isFinite(request.contentLength)) {
+    if (!isValidContentLengthHeaderValue(val)) {
       throw new InvalidArgumentError('invalid content-length header')
     }
+    request.contentLength = parseInt(val, 10)
   } else if (request.contentType === null && headerName === 'content-type') {
     request.contentType = val
     request.headers.push(key, val)
   } else if (headerName === 'transfer-encoding' || headerName === 'keep-alive' || headerName === 'upgrade') {
     throw new InvalidArgumentError(`invalid ${headerName} header`)
   } else if (headerName === 'connection') {
-    const value = typeof val === 'string' ? val.toLowerCase() : null
-    if (value !== 'close' && value !== 'keep-alive') {
+    // Per RFC 7230 Section 6.1, Connection header can contain
+    // a comma-separated list of connection option tokens (header names)
+    const value = typeof val === 'string' ? val : null
+    if (value === null) {
       throw new InvalidArgumentError('invalid connection header')
     }
 
-    if (value === 'close') {
-      request.reset = true
+    for (const token of value.toLowerCase().split(',')) {
+      const trimmed = token.trim()
+      if (!isValidHTTPToken(trimmed)) {
+        throw new InvalidArgumentError('invalid connection header')
+      }
+      if (trimmed === 'close') {
+        request.reset = true
+      }
     }
   } else if (headerName === 'expect') {
     throw new NotSupportedError('expect header not supported')
@@ -12825,6 +12903,7 @@ const { debuglog } = __nccwpck_require__(7975)
 const { parseAddress } = __nccwpck_require__(8102)
 
 const debug = debuglog('undici:socks5')
+const EMPTY_BUFFER = Buffer.alloc(0)
 
 // SOCKS5 constants
 const SOCKS_VERSION = 0x05
@@ -12869,6 +12948,7 @@ const STATES = {
   INITIAL: 'initial',
   HANDSHAKING: 'handshaking',
   AUTHENTICATING: 'authenticating',
+  AUTHENTICATED: 'authenticated',
   CONNECTING: 'connecting',
   CONNECTED: 'connected',
   ERROR: 'error',
@@ -12890,7 +12970,10 @@ class Socks5Client extends EventEmitter {
     this.socket = socket
     this.options = options
     this.state = STATES.INITIAL
-    this.buffer = Buffer.alloc(0)
+    this.buffer = EMPTY_BUFFER
+    this.onSocketData = this.onData.bind(this)
+    this.onSocketError = this.onError.bind(this)
+    this.onSocketClose = this.onClose.bind(this)
 
     // Authentication settings
     this.authMethods = []
@@ -12900,9 +12983,9 @@ class Socks5Client extends EventEmitter {
     this.authMethods.push(AUTH_METHODS.NO_AUTH)
 
     // Socket event handlers
-    this.socket.on('data', this.onData.bind(this))
-    this.socket.on('error', this.onError.bind(this))
-    this.socket.on('close', this.onClose.bind(this))
+    this.socket.on('data', this.onSocketData)
+    this.socket.on('error', this.onSocketError)
+    this.socket.on('close', this.onSocketClose)
   }
 
   /**
@@ -12957,6 +13040,11 @@ class Socks5Client extends EventEmitter {
     }
   }
 
+  markAuthenticated () {
+    this.state = STATES.AUTHENTICATED
+    this.emit('authenticated')
+  }
+
   /**
    * Start the SOCKS5 handshake
    */
@@ -13007,7 +13095,7 @@ class Socks5Client extends EventEmitter {
     debug('server selected auth method', method)
 
     if (method === AUTH_METHODS.NO_AUTH) {
-      this.emit('authenticated')
+      this.markAuthenticated()
     } else if (method === AUTH_METHODS.USERNAME_PASSWORD) {
       this.state = STATES.AUTHENTICATING
       this.sendAuthRequest()
@@ -13072,7 +13160,7 @@ class Socks5Client extends EventEmitter {
 
     this.buffer = this.buffer.subarray(2)
     debug('authentication successful')
-    this.emit('authenticated')
+    this.markAuthenticated()
   }
 
   /**
@@ -13081,8 +13169,12 @@ class Socks5Client extends EventEmitter {
    * @param {number} port - Target port
    */
   connect (address, port) {
-    if (this.state === STATES.CONNECTED) {
-      throw new InvalidArgumentError('Already connected')
+    if (this.state === STATES.CONNECTING || this.state === STATES.CONNECTED) {
+      throw new InvalidArgumentError('Connection already in progress')
+    }
+
+    if (this.state !== STATES.AUTHENTICATED) {
+      throw new InvalidArgumentError('Client must be authenticated before CONNECT')
     }
 
     debug('connecting to', address, port)
@@ -13181,8 +13273,9 @@ class Socks5Client extends EventEmitter {
 
     const boundPort = this.buffer.readUInt16BE(offset)
 
-    this.buffer = this.buffer.subarray(responseLength)
+    this.buffer = EMPTY_BUFFER
     this.state = STATES.CONNECTED
+    this.socket.removeListener('data', this.onSocketData)
 
     debug('connected, bound address:', boundAddress, 'port:', boundPort)
     this.emit('connected', { address: boundAddress, port: boundPort })
@@ -13279,34 +13372,43 @@ function parseAddress (address) {
  */
 function parseIPv6 (address) {
   const buffer = Buffer.alloc(16)
-  const parts = address.split(':')
-  let partIndex = 0
-  let bufferIndex = 0
+  let normalizedAddress = address
+
+  // Expand an embedded IPv4 tail into the last two IPv6 groups.
+  if (address.includes('.')) {
+    const lastColonIndex = address.lastIndexOf(':')
+    const ipv4Part = address.slice(lastColonIndex + 1)
+
+    if (net.isIPv4(ipv4Part)) {
+      const octets = ipv4Part.split('.').map(Number)
+      const high = ((octets[0] << 8) | octets[1]).toString(16)
+      const low = ((octets[2] << 8) | octets[3]).toString(16)
+      normalizedAddress = `${address.slice(0, lastColonIndex)}:${high}:${low}`
+    }
+  }
 
   // Handle compressed notation (::)
-  const doubleColonIndex = address.indexOf('::')
+  const doubleColonIndex = normalizedAddress.indexOf('::')
   if (doubleColonIndex !== -1) {
-    // Count non-empty parts
-    const nonEmptyParts = parts.filter(p => p.length > 0).length
-    const skipParts = 8 - nonEmptyParts
+    const before = normalizedAddress.slice(0, doubleColonIndex)
+    const after = normalizedAddress.slice(doubleColonIndex + 2)
+    const beforeParts = before === '' ? [] : before.split(':')
+    const afterParts = after === '' ? [] : after.split(':')
 
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === '' && i === doubleColonIndex / 3) {
-        // Skip empty parts for ::
-        bufferIndex += skipParts * 2
-      } else if (parts[i] !== '') {
-        const value = parseInt(parts[i], 16)
-        buffer.writeUInt16BE(value, bufferIndex)
-        bufferIndex += 2
-      }
+    let bufferIndex = 0
+    for (const part of beforeParts) {
+      buffer.writeUInt16BE(parseInt(part, 16), bufferIndex)
+      bufferIndex += 2
+    }
+    bufferIndex = 16 - afterParts.length * 2
+    for (const part of afterParts) {
+      buffer.writeUInt16BE(parseInt(part, 16), bufferIndex)
+      bufferIndex += 2
     }
   } else {
-    // No compression, parse normally
-    for (const part of parts) {
-      if (part === '') continue
-      const value = parseInt(part, 16)
-      buffer.writeUInt16BE(value, partIndex * 2)
-      partIndex++
+    const parts = normalizedAddress.split(':')
+    for (let i = 0; i < parts.length; i++) {
+      buffer.writeUInt16BE(parseInt(parts[i], 16), i * 2)
     }
   }
 
@@ -14135,19 +14237,39 @@ function parseHeaders (headers, obj) {
     const key = headerNameToString(headers[i])
     let val = obj[key]
 
-    if (val) {
-      if (typeof val === 'string') {
-        val = [val]
-        obj[key] = val
-      }
-      val.push(headers[i + 1].toString('latin1'))
-    } else {
-      const headersValue = headers[i + 1]
-      if (typeof headersValue === 'string') {
-        obj[key] = headersValue
+    if (val !== undefined) {
+      if (!Object.hasOwn(obj, key)) {
+        const headersValue = typeof headers[i + 1] === 'string'
+          ? headers[i + 1]
+          : Array.isArray(headers[i + 1])
+            ? headers[i + 1].map(x => x.toString('latin1'))
+            : headers[i + 1].toString('latin1')
+
+        if (key === '__proto__') {
+          Object.defineProperty(obj, key, {
+            value: headersValue,
+            enumerable: true,
+            configurable: true,
+            writable: true
+          })
+        } else {
+          obj[key] = headersValue
+        }
       } else {
-        obj[key] = Array.isArray(headersValue) ? headersValue.map(x => x.toString('latin1')) : headersValue.toString('latin1')
+        if (typeof val === 'string') {
+          val = [val]
+          obj[key] = val
+        }
+        val.push(headers[i + 1].toString('latin1'))
       }
+    } else {
+      const headersValue = typeof headers[i + 1] === 'string'
+        ? headers[i + 1]
+        : Array.isArray(headers[i + 1])
+          ? headers[i + 1].map(x => x.toString('latin1'))
+          : headers[i + 1].toString('latin1')
+
+      obj[key] = headersValue
     }
   }
 
@@ -14710,7 +14832,7 @@ class Agent extends DispatcherBase {
       throw new InvalidArgumentError('maxOrigins must be a number greater than 0')
     }
 
-    super()
+    super(options)
 
     if (connect && typeof connect !== 'function') {
       connect = { ...connect }
@@ -14895,7 +15017,7 @@ class BalancedPool extends PoolBase {
       throw new InvalidArgumentError('factory must be a function.')
     }
 
-    super()
+    super(opts)
 
     this[kOptions] = { ...util.deepClone(opts) }
     this[kOptions].interceptors = opts.interceptors
@@ -15125,6 +15247,9 @@ const constants = __nccwpck_require__(2418)
 const EMPTY_BUF = Buffer.alloc(0)
 const FastBuffer = Buffer[Symbol.species]
 const removeAllListeners = util.removeAllListeners
+const kIdleSocketValidation = Symbol('kIdleSocketValidation')
+const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout')
+const kSocketUsed = Symbol('kSocketUsed')
 
 let extractBody
 
@@ -15137,9 +15262,9 @@ function lazyllhttp () {
   let useWasmSIMD = process.arch !== 'ppc64'
   // The Env Variable UNDICI_NO_WASM_SIMD allows explicitly overriding the default behavior
   if (process.env.UNDICI_NO_WASM_SIMD === '1') {
-    useWasmSIMD = true
-  } else if (process.env.UNDICI_NO_WASM_SIMD === '0') {
     useWasmSIMD = false
+  } else if (process.env.UNDICI_NO_WASM_SIMD === '0') {
+    useWasmSIMD = true
   }
 
   if (useWasmSIMD) {
@@ -15284,6 +15409,7 @@ class Parser {
      */
     this.socket = socket
     this.timeout = null
+    this.timeoutWeakRef = new WeakRef(this)
     this.timeoutValue = null
     this.timeoutType = null
     this.statusCode = 0
@@ -15321,9 +15447,9 @@ class Parser {
 
       if (delay) {
         if (type & USE_FAST_TIMER) {
-          this.timeout = timers.setFastTimeout(onParserTimeout, delay, new WeakRef(this))
+          this.timeout = timers.setFastTimeout(onParserTimeout, delay, this.timeoutWeakRef)
         } else {
-          this.timeout = setTimeout(onParserTimeout, delay, new WeakRef(this))
+          this.timeout = setTimeout(onParserTimeout, delay, this.timeoutWeakRef)
           this.timeout?.unref()
         }
       }
@@ -15417,21 +15543,60 @@ class Parser {
           this.paused = true
           socket.unshift(data)
         } else {
-          const ptr = llhttp.llhttp_get_error_reason(this.ptr)
-          let message = ''
-          if (ptr) {
-            const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
-            message =
-              'Response does not match the HTTP/1.1 protocol (' +
-              Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-              ')'
-          }
-          throw new HTTPParserError(message, constants.ERROR[ret], data)
+          throw this.createError(ret, data)
         }
       }
     } catch (err) {
       util.destroy(socket, err)
     }
+  }
+
+  finish () {
+    assert(currentParser === null)
+    assert(this.ptr != null)
+    assert(!this.paused)
+
+    const { llhttp } = this
+
+    let ret
+
+    try {
+      currentParser = this
+      ret = llhttp.llhttp_finish(this.ptr)
+    } finally {
+      currentParser = null
+    }
+
+    if (ret === constants.ERROR.OK) {
+      return null
+    }
+
+    if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+      this.paused = true
+      return null
+    }
+
+    return this.createError(ret, EMPTY_BUF)
+  }
+
+  createError (ret, data) {
+    const { llhttp, contentLength, bytesRead } = this
+
+    if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+      return new ResponseContentLengthMismatchError()
+    }
+
+    const ptr = llhttp.llhttp_get_error_reason(this.ptr)
+    let message = ''
+    if (ptr) {
+      const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
+      message =
+        'Response does not match the HTTP/1.1 protocol (' +
+        Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+        ')'
+    }
+
+    return new HTTPParserError(message, constants.ERROR[ret], data)
   }
 
   destroy () {
@@ -15465,6 +15630,11 @@ class Parser {
     const { socket, client } = this
 
     if (socket.destroyed) {
+      return -1
+    }
+
+    if (client[kRunning] === 0) {
+      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)))
       return -1
     }
 
@@ -15593,6 +15763,11 @@ class Parser {
     const { client, socket, headers, statusText } = this
 
     if (socket.destroyed) {
+      return -1
+    }
+
+    if (client[kRunning] === 0) {
+      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)))
       return -1
     }
 
@@ -15774,6 +15949,7 @@ class Parser {
     request.onComplete(headers)
 
     client[kQueue][client[kRunningIdx]++] = null
+    socket[kSocketUsed] = client[kPending] === 0
 
     if (socket[kWriting]) {
       assert(client[kRunning] === 0)
@@ -15850,6 +16026,9 @@ function connectH1 (client, socket) {
   socket[kWriting] = false
   socket[kReset] = false
   socket[kBlocking] = false
+  socket[kIdleSocketValidation] = 0
+  socket[kIdleSocketValidationTimeout] = null
+  socket[kSocketUsed] = false
   socket[kParser] = new Parser(client, socket, llhttpInstance)
 
   util.addListener(socket, 'error', onHttpSocketError)
@@ -15892,7 +16071,7 @@ function connectH1 (client, socket) {
      * @returns {boolean}
      */
     busy (request) {
-      if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+      if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
         return true
       }
 
@@ -15938,8 +16117,11 @@ function onHttpSocketError (err) {
   // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
   // to the user.
   if (err.code === 'ECONNRESET' && parser.statusCode && !parser.shouldKeepAlive) {
-    // We treat all incoming data so for as a valid response.
-    parser.onMessageComplete()
+    const parserErr = parser.finish()
+    if (parserErr) {
+      this[kError] = parserErr
+      this[kClient][kOnError](parserErr)
+    }
     return
   }
 
@@ -15956,8 +16138,10 @@ function onHttpSocketEnd () {
   const parser = this[kParser]
 
   if (parser.statusCode && !parser.shouldKeepAlive) {
-    // We treat all incoming data so far as a valid response.
-    parser.onMessageComplete()
+    const parserErr = parser.finish()
+    if (parserErr) {
+      util.destroy(this, parserErr)
+    }
     return
   }
 
@@ -15967,10 +16151,11 @@ function onHttpSocketEnd () {
 function onHttpSocketClose () {
   const parser = this[kParser]
 
+  clearIdleSocketValidation(this)
+
   if (parser) {
     if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-      // We treat all incoming data so far as a valid response.
-      parser.onMessageComplete()
+      this[kError] = parser.finish() || this[kError]
     }
 
     this[kParser].destroy()
@@ -16014,6 +16199,28 @@ function onSocketClose () {
   this[kClosed] = true
 }
 
+function clearIdleSocketValidation (socket) {
+  if (socket[kIdleSocketValidationTimeout]) {
+    clearTimeout(socket[kIdleSocketValidationTimeout])
+    socket[kIdleSocketValidationTimeout] = null
+  }
+
+  socket[kIdleSocketValidation] = 0
+}
+
+function scheduleIdleSocketValidation (client, socket) {
+  socket[kIdleSocketValidation] = 1
+  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+    socket[kIdleSocketValidationTimeout] = null
+    socket[kIdleSocketValidation] = 2
+
+    if (client[kSocket] === socket && !socket.destroyed) {
+      client[kResume]()
+    }
+  }, 0)
+  socket[kIdleSocketValidationTimeout].unref?.()
+}
+
 /**
  * @param {import('./client.js')} client
  */
@@ -16029,6 +16236,32 @@ function resumeH1 (client) {
     } else if (socket[kNoRef] && socket.ref) {
       socket.ref()
       socket[kNoRef] = false
+    }
+
+    if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+      if (socket[kIdleSocketValidation] === 0) {
+        scheduleIdleSocketValidation(client, socket)
+        socket[kParser].readMore()
+        if (socket.destroyed) {
+          return
+        }
+        return
+      }
+
+      if (socket[kIdleSocketValidation] === 1) {
+        socket[kParser].readMore()
+        if (socket.destroyed) {
+          return
+        }
+        return
+      }
+    }
+
+    if (client[kRunning] === 0) {
+      socket[kParser].readMore()
+      if (socket.destroyed) {
+        return
+      }
     }
 
     if (client[kSize] === 0) {
@@ -16129,6 +16362,7 @@ function writeH1 (client, request) {
   }
 
   const socket = client[kSocket]
+  clearIdleSocketValidation(socket)
 
   /**
    * @param {Error} [err]
@@ -17803,7 +18037,8 @@ class Client extends DispatcherBase {
     useH2c,
     initialWindowSize,
     connectionWindowSize,
-    pingInterval
+    pingInterval,
+    webSocket
   } = {}) {
     if (keepAlive !== undefined) {
       throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -17911,7 +18146,7 @@ class Client extends DispatcherBase {
       throw new InvalidArgumentError('pingInterval must be a positive integer, greater or equal to 0')
     }
 
-    super()
+    super({ webSocket })
 
     if (typeof connect !== 'function') {
       connect = buildConnector({
@@ -17924,9 +18159,13 @@ class Client extends DispatcherBase {
         ...(typeof autoSelectFamily === 'boolean' ? { autoSelectFamily, autoSelectFamilyAttemptTimeout } : undefined),
         ...connect
       })
-    } else if (socketPath != null) {
+    } else {
       const customConnect = connect
-      connect = (opts, callback) => customConnect({ ...opts, socketPath }, callback)
+      connect = (opts, callback) => customConnect({
+        ...opts,
+        ...(socketPath != null ? { socketPath } : null),
+        ...(allowH2 != null ? { allowH2 } : null)
+      }, callback)
     }
 
     this[kUrl] = util.parseOrigin(url)
@@ -18141,65 +18380,70 @@ function connect (client) {
     })
   }
 
-  client[kConnector]({
-    host,
-    hostname,
-    protocol,
-    port,
-    servername: client[kServerName],
-    localAddress: client[kLocalAddress]
-  }, (err, socket) => {
-    if (err) {
-      handleConnectError(client, err, { host, hostname, protocol, port })
+  try {
+    client[kConnector]({
+      host,
+      hostname,
+      protocol,
+      port,
+      servername: client[kServerName],
+      localAddress: client[kLocalAddress]
+    }, (err, socket) => {
+      if (err) {
+        handleConnectError(client, err, { host, hostname, protocol, port })
+        client[kResume]()
+        return
+      }
+
+      if (client.destroyed) {
+        util.destroy(socket.on('error', noop), new ClientDestroyedError())
+        client[kResume]()
+        return
+      }
+
+      assert(socket)
+
+      try {
+        client[kHTTPContext] = socket.alpnProtocol === 'h2'
+          ? connectH2(client, socket)
+          : connectH1(client, socket)
+      } catch (err) {
+        socket.destroy().on('error', noop)
+        handleConnectError(client, err, { host, hostname, protocol, port })
+        client[kResume]()
+        return
+      }
+
+      client[kConnecting] = false
+
+      socket[kCounter] = 0
+      socket[kMaxRequests] = client[kMaxRequests]
+      socket[kClient] = client
+      socket[kError] = null
+
+      if (channels.connected.hasSubscribers) {
+        channels.connected.publish({
+          connectParams: {
+            host,
+            hostname,
+            protocol,
+            port,
+            version: client[kHTTPContext]?.version,
+            servername: client[kServerName],
+            localAddress: client[kLocalAddress]
+          },
+          connector: client[kConnector],
+          socket
+        })
+      }
+
+      client.emit('connect', client[kUrl], [client])
       client[kResume]()
-      return
-    }
-
-    if (client.destroyed) {
-      util.destroy(socket.on('error', noop), new ClientDestroyedError())
-      client[kResume]()
-      return
-    }
-
-    assert(socket)
-
-    try {
-      client[kHTTPContext] = socket.alpnProtocol === 'h2'
-        ? connectH2(client, socket)
-        : connectH1(client, socket)
-    } catch (err) {
-      socket.destroy().on('error', noop)
-      handleConnectError(client, err, { host, hostname, protocol, port })
-      client[kResume]()
-      return
-    }
-
-    client[kConnecting] = false
-
-    socket[kCounter] = 0
-    socket[kMaxRequests] = client[kMaxRequests]
-    socket[kClient] = client
-    socket[kError] = null
-
-    if (channels.connected.hasSubscribers) {
-      channels.connected.publish({
-        connectParams: {
-          host,
-          hostname,
-          protocol,
-          port,
-          version: client[kHTTPContext]?.version,
-          servername: client[kServerName],
-          localAddress: client[kLocalAddress]
-        },
-        connector: client[kConnector],
-        socket
-      })
-    }
-
-    client.emit('connect', client[kUrl], [client])
+    })
+  } catch (err) {
+    handleConnectError(client, err, { host, hostname, protocol, port })
     client[kResume]()
-  })
+  }
 }
 
 function handleConnectError (client, err, { host, hostname, protocol, port }) {
@@ -18362,6 +18606,7 @@ const { kDestroy, kClose, kClosed, kDestroyed, kDispatch } = __nccwpck_require__
 
 const kOnDestroyed = Symbol('onDestroyed')
 const kOnClosed = Symbol('onClosed')
+const kWebSocketOptions = Symbol('webSocketOptions')
 
 class DispatcherBase extends Dispatcher {
   /** @type {boolean} */
@@ -18375,6 +18620,24 @@ class DispatcherBase extends Dispatcher {
 
   /** @type {Array<Function>|null} */
   [kOnClosed] = null
+
+  /**
+   * @param {import('../../types/dispatcher').DispatcherOptions} [opts]
+   */
+  constructor (opts) {
+    super()
+    this[kWebSocketOptions] = opts?.webSocket ?? {}
+  }
+
+  /**
+   * @returns {import('../../types/dispatcher').WebSocketOptions}
+   */
+  get webSocketOptions () {
+    return {
+      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024 // 128 MB default
+    }
+  }
 
   /** @returns {boolean} */
   get destroyed () {
@@ -18892,7 +19155,7 @@ class H2CClient extends Client {
       )
     }
 
-    const { connect, maxConcurrentStreams, pipelining, ...opts } =
+    const { maxConcurrentStreams, pipelining, ...opts } =
             clientOpts ?? {}
     let defaultMaxConcurrentStreams = 100
     let defaultPipelining = 100
@@ -19221,7 +19484,7 @@ class Pool extends PoolBase {
       })
     }
 
-    super()
+    super(options)
 
     this[kConnections] = connections || null
     this[kUrl] = util.parseOrigin(origin)
@@ -19426,7 +19689,8 @@ class ProxyAgent extends DispatcherBase {
           factory: agentFactory,
           username: opts.username || username,
           password: opts.password || password,
-          proxyTls: opts.proxyTls
+          proxyTls: opts.proxyTls,
+          requestTls: opts.requestTls
         })
       }
 
@@ -19798,13 +20062,12 @@ module.exports = RoundRobinPool
 "use strict";
 
 
-const net = __nccwpck_require__(7030)
 const { URL } = __nccwpck_require__(3136)
 
 let tls // include tls conditionally since it is not always available
 const DispatcherBase = __nccwpck_require__(4339)
 const { InvalidArgumentError } = __nccwpck_require__(5793)
-const { Socks5Client } = __nccwpck_require__(9076)
+const { Socks5Client, STATES } = __nccwpck_require__(9076)
 const { kDispatch, kClose, kDestroy } = __nccwpck_require__(33)
 const Pool = __nccwpck_require__(7454)
 const buildConnector = __nccwpck_require__(6962)
@@ -19815,8 +20078,10 @@ const debug = debuglog('undici:socks5-proxy')
 const kProxyUrl = Symbol('proxy url')
 const kProxyHeaders = Symbol('proxy headers')
 const kProxyAuth = Symbol('proxy auth')
-const kPool = Symbol('pool')
+const kProxyProtocol = Symbol('proxy protocol')
+const kPools = Symbol('pools')
 const kConnector = Symbol('connector')
+const kRequestTls = Symbol('request tls settings')
 
 // Static flag to ensure warning is only emitted once per process
 let experimentalWarningEmitted = false
@@ -19850,6 +20115,8 @@ class Socks5ProxyAgent extends DispatcherBase {
 
     this[kProxyUrl] = url
     this[kProxyHeaders] = options.headers || {}
+    this[kProxyProtocol] = options.proxyTls ? 'https:' : 'http:'
+    this[kRequestTls] = options.requestTls
 
     // Extract auth from URL or options
     this[kProxyAuth] = {
@@ -19863,8 +20130,8 @@ class Socks5ProxyAgent extends DispatcherBase {
       servername: options.proxyTls?.servername || url.hostname
     })
 
-    // Pool for the actual HTTP connections (with SOCKS5 tunnel connect function)
-    this[kPool] = null
+    // Pools for the actual HTTP connections (with SOCKS5 tunnel connect function), keyed by origin
+    this[kPools] = new Map()
   }
 
   /**
@@ -19878,23 +20145,18 @@ class Socks5ProxyAgent extends DispatcherBase {
 
     // Connect to the SOCKS5 proxy
     const socket = await new Promise((resolve, reject) => {
-      const onConnect = () => {
-        socket.removeListener('error', onError)
-        resolve(socket)
-      }
-
-      const onError = (err) => {
-        socket.removeListener('connect', onConnect)
-        reject(err)
-      }
-
-      const socket = net.connect({
+      this[kConnector]({
+        hostname: proxyHost,
         host: proxyHost,
-        port: proxyPort
+        port: proxyPort,
+        protocol: this[kProxyProtocol]
+      }, (err, socket) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(socket)
+        }
       })
-
-      socket.once('connect', onConnect)
-      socket.once('error', onError)
     })
 
     // Create SOCKS5 client
@@ -19928,7 +20190,7 @@ class Socks5ProxyAgent extends DispatcherBase {
       }
 
       // Check if already authenticated (for NO_AUTH method)
-      if (socks5Client.state === 'authenticated') {
+      if (socks5Client.state === STATES.AUTHENTICATED) {
         clearTimeout(timeout)
         resolve()
       } else {
@@ -19969,15 +20231,17 @@ class Socks5ProxyAgent extends DispatcherBase {
   /**
    * Dispatch a request through the SOCKS5 proxy
    */
-  async [kDispatch] (opts, handler) {
+  [kDispatch] (opts, handler) {
     const { origin } = opts
 
     debug('dispatching request to', origin, 'via SOCKS5')
 
     try {
-      // Create Pool with custom connect function if we don't have one yet
-      if (!this[kPool] || this[kPool].destroyed || this[kPool].closed) {
-        this[kPool] = new Pool(origin, {
+      const originKey = String(origin)
+      let pool = this[kPools].get(originKey)
+      // Create a Pool per origin so requests are not routed to the wrong host
+      if (!pool || pool.destroyed || pool.closed) {
+        pool = new Pool(origin, {
           pipelining: opts.pipelining,
           connections: opts.connections,
           connect: async (connectOpts, callback) => {
@@ -19999,9 +20263,9 @@ class Socks5ProxyAgent extends DispatcherBase {
                 }
                 debug('upgrading to TLS')
                 finalSocket = tls.connect({
+                  ...this[kRequestTls],
                   socket,
-                  servername: targetHost,
-                  ...connectOpts.tls || {}
+                  servername: this[kRequestTls]?.servername || targetHost
                 })
 
                 await new Promise((resolve, reject) => {
@@ -20017,14 +20281,19 @@ class Socks5ProxyAgent extends DispatcherBase {
             }
           }
         })
+        this[kPools].set(originKey, pool)
       }
 
-      // Dispatch the request through the pool
-      return this[kPool][kDispatch](opts, handler)
+      // Dispatch the request through the per-origin pool
+      return pool[kDispatch](opts, handler)
     } catch (err) {
       debug('dispatch error:', err)
-      if (typeof handler.onError === 'function') {
+      if (typeof handler.onResponseError === 'function') {
+        handler.onResponseError(null, err)
+        return false
+      } else if (typeof handler.onError === 'function') {
         handler.onError(err)
+        return false
       } else {
         throw err
       }
@@ -20032,15 +20301,21 @@ class Socks5ProxyAgent extends DispatcherBase {
   }
 
   async [kClose] () {
-    if (this[kPool]) {
-      await this[kPool].close()
+    const closePromises = []
+    for (const pool of this[kPools].values()) {
+      closePromises.push(pool.close())
     }
+    this[kPools].clear()
+    await Promise.all(closePromises)
   }
 
   async [kDestroy] (err) {
-    if (this[kPool]) {
-      await this[kPool].destroy(err)
+    const destroyPromises = []
+    for (const pool of this[kPools].values()) {
+      destroyPromises.push(pool.destroy(err))
     }
+    this[kPools].clear()
+    await Promise.all(destroyPromises)
   }
 }
 
@@ -20098,7 +20373,8 @@ module.exports = {
 
 // We include a version number for the Dispatcher API. In case of breaking changes,
 // this version number must be increased to avoid conflicts.
-const globalDispatcher = Symbol.for('undici.globalDispatcher.1')
+const globalDispatcher = Symbol.for('undici.globalDispatcher.2')
+const legacyGlobalDispatcher = Symbol.for('undici.globalDispatcher.1')
 const { InvalidArgumentError } = __nccwpck_require__(5793)
 const Agent = __nccwpck_require__(3779)
 
@@ -20110,7 +20386,15 @@ function setGlobalDispatcher (agent) {
   if (!agent || typeof agent.dispatch !== 'function') {
     throw new InvalidArgumentError('Argument agent must implement Agent')
   }
+
   Object.defineProperty(globalThis, globalDispatcher, {
+    value: agent,
+    writable: true,
+    enumerable: false,
+    configurable: false
+  })
+
+  Object.defineProperty(globalThis, legacyGlobalDispatcher, {
     value: agent,
     writable: true,
     enumerable: false,
@@ -20119,7 +20403,7 @@ function setGlobalDispatcher (agent) {
 }
 
 function getGlobalDispatcher () {
-  return globalThis[globalDispatcher]
+  return globalThis[legacyGlobalDispatcher]
 }
 
 // These are the globals that can be installed by undici.install().
@@ -20289,7 +20573,7 @@ class CacheHandler {
     }
 
     const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {}
-    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives)) {
+    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
       return downstreamOnHeaders()
     }
 
@@ -20494,8 +20778,9 @@ class CacheHandler {
  * @param {number} statusCode
  * @param {import('../../types/header.d.ts').IncomingHttpHeaders} resHeaders
  * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives} cacheControlDirectives
+ * @param {import('../../types/header.d.ts').IncomingHttpHeaders} [reqHeaders]
  */
-function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives) {
+function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
   // Status code must be final and understood.
   if (statusCode < 200 || NOT_UNDERSTOOD_STATUS_CODES.includes(statusCode)) {
     return false
@@ -20526,8 +20811,16 @@ function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirect
   }
 
   // https://www.rfc-editor.org/rfc/rfc9111.html#name-storing-responses-to-authen
-  if (resHeaders.authorization) {
-    if (!cacheControlDirectives.public || typeof resHeaders.authorization !== 'string') {
+  if (reqHeaders?.authorization) {
+    if (
+      !cacheControlDirectives.public &&
+      !cacheControlDirectives['s-maxage'] &&
+      !cacheControlDirectives['must-revalidate']
+    ) {
+      return false
+    }
+
+    if (typeof reqHeaders.authorization !== 'string') {
       return false
     }
 
@@ -20647,8 +20940,16 @@ function determineDeleteAt (now, cacheControlDirectives, staleAt) {
     staleIfError = staleAt + (cacheControlDirectives['stale-if-error'] * 1000)
   }
 
-  if (staleWhileRevalidate === -Infinity && staleIfError === -Infinity) {
+  if (cacheControlDirectives.immutable && staleWhileRevalidate === -Infinity && staleIfError === -Infinity) {
     immutable = now + 31536000000
+  }
+
+  // When no stale directives or immutable flag, add a revalidation buffer
+  // equal to the freshness lifetime so the entry survives past staleAt long
+  // enough to be revalidated instead of silently disappearing.
+  if (staleWhileRevalidate === -Infinity && staleIfError === -Infinity && immutable === -Infinity) {
+    const freshnessLifetime = staleAt - now
+    return staleAt + freshnessLifetime
   }
 
   return Math.max(staleAt, staleWhileRevalidate, staleIfError, immutable)
@@ -22059,6 +22360,9 @@ class UnwrapController {
 
   [kResume] = null
 
+  rawHeaders = null
+  rawTrailers = null
+
   constructor (abort) {
     this.#abort = abort
   }
@@ -22118,11 +22422,13 @@ module.exports = class UnwrapHandler {
   }
 
   onUpgrade (statusCode, rawHeaders, socket) {
+    this.#controller.rawHeaders = rawHeaders
     this.#handler.onRequestUpgrade?.(this.#controller, statusCode, parseHeaders(rawHeaders), socket)
   }
 
   onHeaders (statusCode, rawHeaders, resume, statusMessage) {
     this.#controller[kResume] = resume
+    this.#controller.rawHeaders = rawHeaders
     this.#handler.onResponseStart?.(this.#controller, statusCode, parseHeaders(rawHeaders), statusMessage)
     return !this.#controller.paused
   }
@@ -22133,6 +22439,7 @@ module.exports = class UnwrapHandler {
   }
 
   onComplete (rawTrailers) {
+    this.#controller.rawTrailers = rawTrailers
     this.#handler.onResponseEnd?.(this.#controller, parseHeaders(rawTrailers))
   }
 
@@ -24870,14 +25177,14 @@ module.exports = MockAgent
 const { kMockCallHistoryAddLog } = __nccwpck_require__(7595)
 const { InvalidArgumentError } = __nccwpck_require__(5793)
 
-function handleFilterCallsWithOptions (criteria, options, handler, store) {
+function handleFilterCallsWithOptions (criteria, options, handler, store, allLogs) {
   switch (options.operator) {
     case 'OR':
-      store.push(...handler(criteria))
+      store.push(...handler(criteria, allLogs))
 
       return store
     case 'AND':
-      return handler.call({ logs: store }, criteria)
+      return handler(criteria, store)
     default:
       // guard -- should never happens because buildAndValidateFilterCallsOptions is called before
       throw new InvalidArgumentError('options.operator must to be a case insensitive string equal to \'OR\' or \'AND\'')
@@ -24902,14 +25209,14 @@ function buildAndValidateFilterCallsOptions (options = {}) {
 }
 
 function makeFilterCalls (parameterName) {
-  return (parameterValue) => {
+  return (parameterValue, logs) => {
     if (typeof parameterValue === 'string' || parameterValue == null) {
-      return this.logs.filter((log) => {
+      return logs.filter((log) => {
         return log[parameterName] === parameterValue
       })
     }
     if (parameterValue instanceof RegExp) {
-      return this.logs.filter((log) => {
+      return logs.filter((log) => {
         return parameterValue.test(log[parameterName])
       })
     }
@@ -25042,30 +25349,30 @@ class MockCallHistory {
 
       const finalOptions = { operator: 'OR', ...buildAndValidateFilterCallsOptions(options) }
 
-      let maybeDuplicatedLogsFiltered = []
+      let maybeDuplicatedLogsFiltered = finalOptions.operator === 'AND' ? this.logs : []
       if ('protocol' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.protocol, finalOptions, this.filterCallsByProtocol, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.protocol, finalOptions, this.filterCallsByProtocol, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('host' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.host, finalOptions, this.filterCallsByHost, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.host, finalOptions, this.filterCallsByHost, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('port' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.port, finalOptions, this.filterCallsByPort, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.port, finalOptions, this.filterCallsByPort, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('origin' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.origin, finalOptions, this.filterCallsByOrigin, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.origin, finalOptions, this.filterCallsByOrigin, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('path' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.path, finalOptions, this.filterCallsByPath, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.path, finalOptions, this.filterCallsByPath, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('hash' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.hash, finalOptions, this.filterCallsByHash, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.hash, finalOptions, this.filterCallsByHash, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('fullUrl' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.fullUrl, finalOptions, this.filterCallsByFullUrl, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.fullUrl, finalOptions, this.filterCallsByFullUrl, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('method' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.method, finalOptions, this.filterCallsByMethod, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.method, finalOptions, this.filterCallsByMethod, maybeDuplicatedLogsFiltered, this.logs)
       }
 
       const uniqLogsFiltered = [...new Set(maybeDuplicatedLogsFiltered)]
@@ -25556,7 +25863,8 @@ module.exports = {
   kMockAgentAddCallHistoryLog: Symbol('mock agent add call history log'),
   kMockAgentIsCallHistoryEnabled: Symbol('mock agent is call history enabled'),
   kMockAgentAcceptsNonStandardSearchParameters: Symbol('mock agent accepts non standard search parameters'),
-  kMockCallHistoryAddLog: Symbol('mock call history add log')
+  kMockCallHistoryAddLog: Symbol('mock call history add log'),
+  kTotalDispatchCount: Symbol('total dispatch count')
 }
 
 
@@ -25574,7 +25882,8 @@ const {
   kMockAgent,
   kOriginalDispatch,
   kOrigin,
-  kGetNetConnect
+  kGetNetConnect,
+  kTotalDispatchCount
 } = __nccwpck_require__(7595)
 const { serializePathWithQuery } = __nccwpck_require__(586)
 const { STATUS_CODES } = __nccwpck_require__(7067)
@@ -25774,6 +26083,8 @@ function addMockDispatch (mockDispatches, key, data, opts) {
   const replyData = typeof data === 'function' ? { callback: data } : { ...data }
   const newMockDispatch = { ...baseData, ...key, pending: true, data: { error: null, ...replyData } }
   mockDispatches.push(newMockDispatch)
+  // Track total number of intercepts ever registered for better error messages
+  mockDispatches[kTotalDispatchCount] = (mockDispatches[kTotalDispatchCount] || 0) + 1
   return newMockDispatch
 }
 
@@ -25969,13 +26280,16 @@ function buildMockDispatch () {
       } catch (error) {
         if (error.code === 'UND_MOCK_ERR_MOCK_NOT_MATCHED') {
           const netConnect = agent[kGetNetConnect]()
+          const totalInterceptsCount = this[kDispatches][kTotalDispatchCount] || this[kDispatches].length
+          const pendingInterceptsCount = this[kDispatches].filter(({ consumed }) => !consumed).length
+          const interceptsMessage = `, ${pendingInterceptsCount} interceptor(s) remaining out of ${totalInterceptsCount} defined`
           if (netConnect === false) {
-            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`)
+            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)${interceptsMessage}`)
           }
           if (checkNetConnect(netConnect, origin)) {
             originalDispatch.call(this, opts, handler)
           } else {
-            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`)
+            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)${interceptsMessage}`)
           }
         } else {
           throw error
@@ -27248,7 +27562,7 @@ function makeCacheKey (opts) {
 
   let fullPath = opts.path || '/'
 
-  if (opts.query && !pathHasQueryOrFragment(opts.path)) {
+  if (opts.query && !pathHasQueryOrFragment(fullPath)) {
     fullPath = serializePathWithQuery(fullPath, opts.query)
   }
 
@@ -27458,6 +27772,10 @@ function parseCacheControlHeader (header) {
                 headers[headers.length - 1] = lastHeader
               }
 
+              for (let j = 0; j < headers.length; j++) {
+                headers[j] = headers[j].trim()
+              }
+
               if (key in output) {
                 output[key] = output[key].concat(headers)
               } else {
@@ -27466,10 +27784,12 @@ function parseCacheControlHeader (header) {
             }
           } else {
             // Something like `no-cache="some-header"`
+            const fieldName = value.trim()
+
             if (key in output) {
-              output[key] = output[key].concat(value)
+              output[key] = output[key].concat(fieldName)
             } else {
-              output[key] = [value]
+              output[key] = [fieldName]
             }
           }
 
@@ -27604,9 +27924,11 @@ function assertCacheMethods (methods, name = 'CacheMethods') {
  * @returns {string}
  */
 function makeDeduplicationKey (cacheKey, excludeHeaders) {
-  // Create a deterministic string key from the cache key
-  // Include origin, method, path, and sorted headers
-  let key = `${cacheKey.origin}:${cacheKey.method}:${cacheKey.path}`
+  // Use JSON.stringify to produce a collision-resistant key.
+  // Previous format used `:` and `=` delimiters without escaping, which
+  // allowed different header sets to produce identical keys (e.g.
+  // {a:"x:b=y"} vs {a:"x", b:"y"}). See: https://github.com/nodejs/undici/issues/5012
+  const headers = {}
 
   if (cacheKey.headers) {
     const sortedHeaders = Object.keys(cacheKey.headers).sort()
@@ -27615,12 +27937,11 @@ function makeDeduplicationKey (cacheKey, excludeHeaders) {
       if (excludeHeaders?.has(header.toLowerCase())) {
         continue
       }
-      const value = cacheKey.headers[header]
-      key += `:${header}=${Array.isArray(value) ? value.join(',') : value}`
+      headers[header] = cacheKey.headers[header]
     }
   }
 
-  return key
+  return JSON.stringify([cacheKey.origin, cacheKey.method, cacheKey.path, headers])
 }
 
 module.exports = {
@@ -30263,7 +30584,6 @@ const { collectASequenceOfCodePointsFast } = __nccwpck_require__(926)
 const { maxNameValuePairSize, maxAttributeValueSize } = __nccwpck_require__(9234)
 const { isCTLExcludingHtab } = __nccwpck_require__(1631)
 const assert = __nccwpck_require__(4589)
-const { unescape: qsUnescape } = __nccwpck_require__(1792)
 
 /**
  * @description Parses the field-value attributes of a set-cookie header string.
@@ -30341,7 +30661,7 @@ function parseSetCookie (header) {
   // store arbitrary data in a cookie-value SHOULD encode that data, for
   // example, using Base64 [RFC4648].
   return {
-    name, value: qsUnescape(value), ...parseUnparsedAttributes(unparsedAttributes)
+    name, value, ...parseUnparsedAttributes(unparsedAttributes)
   }
 }
 
@@ -30539,32 +30859,25 @@ function parseUnparsedAttributes (unparsedAttributes, cookieAttributeList = {}) 
     // If the attribute-name case-insensitively matches the string
     // "SameSite", the user agent MUST process the cookie-av as follows:
 
-    // 1. Let enforcement be "Default".
-    let enforcement = 'Default'
-
     const attributeValueLowercase = attributeValue.toLowerCase()
-    // 2. If cookie-av's attribute-value is a case-insensitive match for
-    //    "None", set enforcement to "None".
-    if (attributeValueLowercase.includes('none')) {
-      enforcement = 'None'
-    }
 
-    // 3. If cookie-av's attribute-value is a case-insensitive match for
-    //    "Strict", set enforcement to "Strict".
-    if (attributeValueLowercase.includes('strict')) {
-      enforcement = 'Strict'
+    // 1. If cookie-av's attribute-value is a case-insensitive match for
+    //    "None", append an attribute to the cookie-attribute-list with an
+    //    attribute-name of "SameSite" and an attribute-value of "None".
+    if (attributeValueLowercase === 'none') {
+      cookieAttributeList.sameSite = 'None'
+    } else if (attributeValueLowercase === 'strict') {
+      // 2. If cookie-av's attribute-value is a case-insensitive match for
+      //    "Strict", append an attribute to the cookie-attribute-list with
+      //    an attribute-name of "SameSite" and an attribute-value of
+      //    "Strict".
+      cookieAttributeList.sameSite = 'Strict'
+    } else if (attributeValueLowercase === 'lax') {
+      // 3. If cookie-av's attribute-value is a case-insensitive match for
+      //    "Lax", append an attribute to the cookie-attribute-list with an
+      //    attribute-name of "SameSite" and an attribute-value of "Lax".
+      cookieAttributeList.sameSite = 'Lax'
     }
-
-    // 4. If cookie-av's attribute-value is a case-insensitive match for
-    //    "Lax", set enforcement to "Lax".
-    if (attributeValueLowercase.includes('lax')) {
-      enforcement = 'Lax'
-    }
-
-    // 5. Append an attribute to the cookie-attribute-list with an
-    //    attribute-name of "SameSite" and an attribute-value of
-    //    enforcement.
-    cookieAttributeList.sameSite = enforcement
   } else {
     cookieAttributeList.unparsed ??= []
 
@@ -33098,10 +33411,10 @@ const { makeEntry } = __nccwpck_require__(1112)
 const { webidl } = __nccwpck_require__(8161)
 const assert = __nccwpck_require__(4589)
 const { isomorphicDecode } = __nccwpck_require__(926)
-const { utf8DecodeBytes } = __nccwpck_require__(6478)
 
 const dd = Buffer.from('--')
 const decoder = new TextDecoder()
+const decoderIgnoreBOM = new TextDecoder('utf-8', { ignoreBOM: true })
 
 /**
  * @param {string} chars
@@ -33280,7 +33593,7 @@ function multipartFormDataParser (input, mimeType) {
       // 5.11. Otherwise:
 
       // 5.11.1. Let value be the UTF-8 decoding without BOM of body.
-      value = utf8DecodeBytes(Buffer.from(body))
+      value = decoderIgnoreBOM.decode(Buffer.from(body))
     }
 
     // 5.12. Assert: name is a scalar value string and value is either a scalar value string or a File object.
@@ -33296,7 +33609,7 @@ function multipartFormDataParser (input, mimeType) {
  * Parses content-disposition attributes (e.g., name="value" or filename*=utf-8''encoded)
  * @param {Buffer} input
  * @param {{ position: number }} position
- * @returns {{ name: string, value: string }}
+ * @returns {{ name: string, value: string, extended: boolean } | null}
  */
 function parseContentDispositionAttribute (input, position) {
   // Skip leading semicolon and whitespace
@@ -33396,7 +33709,7 @@ function parseContentDispositionAttribute (input, position) {
     value = decoder.decode(tokenValue)
   }
 
-  return { name: attrNameStr, value }
+  return { name: attrNameStr, value, extended: isExtended }
 }
 
 /**
@@ -33460,6 +33773,9 @@ function parseMultipartFormDataHeaders (input, position) {
     switch (bufferToLowerCasedHeaderName(headerName)) {
       case 'content-disposition': {
         name = filename = null
+        // Track whether filename was set from the extended (RFC 5987) form so
+        // a subsequent legacy `filename` attribute does not override it.
+        let filenameIsExtended = false
 
         // Collect the disposition type (should be "form-data")
         const dispositionType = collectASequenceOfBytes(
@@ -33475,8 +33791,8 @@ function parseMultipartFormDataHeaders (input, position) {
         // Parse attributes recursively until CRLF
         while (
           position.position < input.length &&
-          input[position.position] !== 0x0d &&
-          input[position.position + 1] !== 0x0a
+          (input[position.position] !== 0x0d ||
+          input[position.position + 1] !== 0x0a)
         ) {
           const attribute = parseContentDispositionAttribute(input, position)
 
@@ -33487,7 +33803,15 @@ function parseMultipartFormDataHeaders (input, position) {
           if (attribute.name === 'name') {
             name = attribute.value
           } else if (attribute.name === 'filename') {
-            filename = attribute.value
+            // Per RFC 5987 §4.1, when both legacy and extended forms of the
+            // same parameter are present, the extended (filename*) form takes
+            // precedence regardless of the order they appear in.
+            if (attribute.extended) {
+              filename = attribute.value
+              filenameIsExtended = true
+            } else if (!filenameIsExtended) {
+              filename = attribute.value
+            }
           }
         }
 
@@ -33540,7 +33864,7 @@ function parseMultipartFormDataHeaders (input, position) {
 
     // 2.9. If position does not point to a sequence of bytes starting with 0x0D 0x0A
     //      (CR LF), return failure. Otherwise, advance position by 2 (past the newline).
-    if (input[position.position] !== 0x0d && input[position.position + 1] !== 0x0a) {
+    if (input[position.position] !== 0x0d || input[position.position + 1] !== 0x0a) {
       throw parsingError('expected CRLF')
     } else {
       position.position += 2
@@ -35747,7 +36071,7 @@ function fetchFinale (fetchParams, response) {
       let responseStatus = 0
 
       // 7. If fetchParams’s request’s mode is not "navigate" or response’s has-cross-origin-redirects is false:
-      if (fetchParams.request.mode !== 'navigator' || !response.hasCrossOriginRedirects) {
+      if (fetchParams.request.mode !== 'navigate' || !response.hasCrossOriginRedirects) {
         // 1. Set responseStatus to response’s status.
         responseStatus = response.status
 
@@ -36150,7 +36474,10 @@ async function httpNetworkOrCacheFetch (
   //    8. If contentLengthHeaderValue is non-null, then append
   //    `Content-Length`/contentLengthHeaderValue to httpRequest’s header
   //    list.
-  if (contentLengthHeaderValue != null) {
+  if (
+    contentLengthHeaderValue != null &&
+    !httpRequest.headersList.contains('content-length', true)
+  ) {
     httpRequest.headersList.append('content-length', contentLengthHeaderValue, true)
   }
 
@@ -36361,12 +36688,25 @@ async function httpNetworkOrCacheFetch (
   // 14. If response’s status is 401, httpRequest’s response tainting is not "cors",
   //     includeCredentials is true, and request’s traversable for user prompts is
   //     a traversable navigable:
-  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && isTraversableNavigable(request.traversableForUserPrompts)) {
+  //
+  //     In Node.js there is no traversable navigable to prompt the user, but we
+  //     still need to handle URL-embedded credentials so authentication retries
+  //     for WebSocket handshakes continue to work.
+  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && (
+    request.useURLCredentials !== undefined ||
+    isTraversableNavigable(request.traversableForUserPrompts)
+  )) {
     // 2. If request’s body is non-null, then:
     if (request.body != null) {
       // 1. If request’s body’s source is null, then return a network error.
       if (request.body.source == null) {
-        return makeNetworkError('expected non-null body source')
+        // Note: In Node.js, this code path should not be reached because
+        // isTraversableNavigable() returns false for non-navigable contexts.
+        // However, we handle it gracefully by returning the response instead of
+        // a network error, as we won't actually retry the request.
+        // This aligns with the Fetch spec discussion in whatwg/fetch#1132,
+        // which allows implementations flexibility when credentials can't be obtained.
+        return response
       }
 
       // 2. Set request’s body to the body of the result of safely extracting
@@ -36904,7 +37244,15 @@ async function httpNetworkFetch (
           const headersList = new HeadersList()
 
           for (let i = 0; i < rawHeaders.length; i += 2) {
-            headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString('latin1'), true)
+            const nameStr = bufferToLowerCasedHeaderName(rawHeaders[i])
+            const value = rawHeaders[i + 1]
+            if (Array.isArray(value) && !Buffer.isBuffer(rawHeaders[i + 1])) {
+              for (const val of value) {
+                headersList.append(nameStr, val.toString('latin1'), true)
+              }
+            } else {
+              headersList.append(nameStr, value.toString('latin1'), true)
+            }
           }
           const location = headersList.get('location', true)
 
@@ -37073,7 +37421,15 @@ async function httpNetworkFetch (
           const headersList = new HeadersList()
 
           for (let i = 0; i < rawHeaders.length; i += 2) {
-            headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString('latin1'), true)
+            const nameStr = bufferToLowerCasedHeaderName(rawHeaders[i])
+            const value = rawHeaders[i + 1]
+            if (Array.isArray(value) && !Buffer.isBuffer(rawHeaders[i + 1])) {
+              for (const val of value) {
+                headersList.append(nameStr, val.toString('latin1'), true)
+              }
+            } else {
+              headersList.append(nameStr, value.toString('latin1'), true)
+            }
           }
 
           resolve({
@@ -40325,8 +40681,10 @@ function includesCredentials (url) {
  * @param {object|string} navigable
  */
 function isTraversableNavigable (navigable) {
-  // TODO
-  return true
+  // Returns true only if we have an actual traversable navigable object
+  // that can prompt the user for credentials. In Node.js, this will always
+  // be false since there's no Window object or navigable.
+  return navigable != null && navigable !== 'client' && navigable !== 'no-traversable'
 }
 
 class EnvironmentSettingsObjectBase {
@@ -41148,10 +41506,10 @@ webidl.util.ConvertToInt = function (V, bitLength, signedness, flags) {
   } else {
     // 3. Otherwise:
 
-    // 1. Let lowerBound be -2^bitLength − 1.
-    lowerBound = Math.pow(-2, bitLength) - 1
+    // 1. Let lowerBound be -2^(bitLength − 1).
+    lowerBound = -Math.pow(2, bitLength - 1)
 
-    // 2. Let upperBound be 2^bitLength − 1 − 1.
+    // 2. Let upperBound be 2^(bitLength − 1) − 1.
     upperBound = Math.pow(2, bitLength - 1) - 1
   }
 
@@ -41230,9 +41588,9 @@ webidl.util.ConvertToInt = function (V, bitLength, signedness, flags) {
   // 10. Set x to x modulo 2^bitLength.
   x = x % Math.pow(2, bitLength)
 
-  // 11. If signedness is "signed" and x ≥ 2^bitLength − 1,
+  // 11. If signedness is "signed" and x ≥ 2^(bitLength − 1),
   //    then return x − 2^bitLength.
-  if (signedness === 'signed' && x >= Math.pow(2, bitLength) - 1) {
+  if (signedness === 'signed' && x >= Math.pow(2, bitLength - 1)) {
     return x - Math.pow(2, bitLength)
   }
 
@@ -42931,40 +43289,35 @@ const tail = Buffer.from([0x00, 0x00, 0xff, 0xff])
 const kBuffer = Symbol('kBuffer')
 const kLength = Symbol('kLength')
 
-// Default maximum decompressed message size: 4 MB
-const kDefaultMaxDecompressedSize = 4 * 1024 * 1024
-
 class PerMessageDeflate {
   /** @type {import('node:zlib').InflateRaw} */
   #inflate
 
   #options = {}
 
-  /** @type {boolean} */
-  #aborted = false
-
-  /** @type {Function|null} */
-  #currentCallback = null
+  #maxPayloadSize = 0
 
   /**
    * @param {Map<string, string>} extensions
    */
-  constructor (extensions) {
+  constructor (extensions, options) {
     this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover')
     this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits')
+
+    this.#maxPayloadSize = options.maxPayloadSize
   }
 
+  /**
+   * Decompress a compressed payload.
+   * @param {Buffer} chunk Compressed data
+   * @param {boolean} fin Final fragment flag
+   * @param {Function} callback Callback function
+   */
   decompress (chunk, fin, callback) {
     // An endpoint uses the following algorithm to decompress a message.
     // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
     //     payload of the message.
     // 2.  Decompress the resulting data using DEFLATE.
-
-    if (this.#aborted) {
-      callback(new MessageSizeExceededError())
-      return
-    }
-
     if (!this.#inflate) {
       let windowBits = Z_DEFAULT_WINDOWBITS
 
@@ -42987,23 +43340,12 @@ class PerMessageDeflate {
       this.#inflate[kLength] = 0
 
       this.#inflate.on('data', (data) => {
-        if (this.#aborted) {
-          return
-        }
-
         this.#inflate[kLength] += data.length
 
-        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
-          this.#aborted = true
+        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
+          callback(new MessageSizeExceededError())
           this.#inflate.removeAllListeners()
-          this.#inflate.destroy()
           this.#inflate = null
-
-          if (this.#currentCallback) {
-            const cb = this.#currentCallback
-            this.#currentCallback = null
-            cb(new MessageSizeExceededError())
-          }
           return
         }
 
@@ -43016,14 +43358,13 @@ class PerMessageDeflate {
       })
     }
 
-    this.#currentCallback = callback
     this.#inflate.write(chunk)
     if (fin) {
       this.#inflate.write(tail)
     }
 
     this.#inflate.flush(() => {
-      if (this.#aborted || !this.#inflate) {
+      if (!this.#inflate) {
         return
       }
 
@@ -43031,7 +43372,6 @@ class PerMessageDeflate {
 
       this.#inflate[kBuffer].length = 0
       this.#inflate[kLength] = 0
-      this.#currentCallback = null
 
       callback(null, full)
     })
@@ -43088,18 +43428,27 @@ class ByteParser extends Writable {
   /** @type {import('./websocket').Handler} */
   #handler
 
+  /** @type {number} */
+  #maxFragments
+
+  /** @type {number} */
+  #maxPayloadSize
+
   /**
    * @param {import('./websocket').Handler} handler
    * @param {Map<string, string>|null} extensions
+   * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
    */
-  constructor (handler, extensions) {
+  constructor (handler, extensions, options = {}) {
     super()
 
     this.#handler = handler
     this.#extensions = extensions == null ? new Map() : extensions
+    this.#maxFragments = options.maxFragments ?? 0
+    this.#maxPayloadSize = options.maxPayloadSize ?? 0
 
     if (this.#extensions.has('permessage-deflate')) {
-      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions))
+      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options))
     }
   }
 
@@ -43113,6 +43462,19 @@ class ByteParser extends Writable {
     this.#loop = true
 
     this.run(callback)
+  }
+
+  #validatePayloadLength () {
+    if (
+      this.#maxPayloadSize > 0 &&
+      !isControlFrame(this.#info.opcode) &&
+      this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
+    ) {
+      failWebsocketConnection(this.#handler, 1009, 'Payload size exceeds maximum allowed size')
+      return false
+    }
+
+    return true
   }
 
   /**
@@ -43203,6 +43565,10 @@ class ByteParser extends Writable {
         if (payloadLength <= 125) {
           this.#info.payloadLength = payloadLength
           this.#state = parserStates.READ_DATA
+
+          if (!this.#validatePayloadLength()) {
+            return
+          }
         } else if (payloadLength === 126) {
           this.#state = parserStates.PAYLOADLENGTH_16
         } else if (payloadLength === 127) {
@@ -43227,6 +43593,10 @@ class ByteParser extends Writable {
 
         this.#info.payloadLength = buffer.readUInt16BE(0)
         this.#state = parserStates.READ_DATA
+
+        if (!this.#validatePayloadLength()) {
+          return
+        }
       } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
         if (this.#byteOffset < 8) {
           return callback()
@@ -43249,6 +43619,10 @@ class ByteParser extends Writable {
 
         this.#info.payloadLength = lower
         this.#state = parserStates.READ_DATA
+
+        if (!this.#validatePayloadLength()) {
+          return
+        }
       } else if (this.#state === parserStates.READ_DATA) {
         if (this.#byteOffset < this.#info.payloadLength) {
           return callback()
@@ -43261,7 +43635,9 @@ class ByteParser extends Writable {
           this.#state = parserStates.INFO
         } else {
           if (!this.#info.compressed) {
-            this.writeFragments(body)
+            if (!this.writeFragments(body)) {
+              return
+            }
 
             // If the frame is not fragmented, a message has been received.
             // If the frame is fragmented, it will terminate with a fin bit set
@@ -43273,29 +43649,41 @@ class ByteParser extends Writable {
 
             this.#state = parserStates.INFO
           } else {
-            this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
-              if (error) {
-                // Use 1009 (Message Too Big) for decompression size limit errors
-                const code = error instanceof MessageSizeExceededError ? 1009 : 1007
-                failWebsocketConnection(this.#handler, code, error.message)
-                return
-              }
+            this.#extensions.get('permessage-deflate').decompress(
+              body,
+              this.#info.fin,
+              (error, data) => {
+                if (error) {
+                  const code = error instanceof MessageSizeExceededError ? 1009 : 1007
+                  failWebsocketConnection(this.#handler, code, error.message)
+                  return
+                }
 
-              this.writeFragments(data)
+                if (!this.writeFragments(data)) {
+                  return
+                }
 
-              if (!this.#info.fin) {
-                this.#state = parserStates.INFO
+                // Check cumulative fragment size
+                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+                  failWebsocketConnection(this.#handler, 1009, new MessageSizeExceededError().message)
+                  return
+                }
+
+                if (!this.#info.fin) {
+                  this.#state = parserStates.INFO
+                  this.#loop = true
+                  this.run(callback)
+                  return
+                }
+
+                websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments())
+
                 this.#loop = true
+                this.#state = parserStates.INFO
                 this.run(callback)
-                return
-              }
-
-              websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments())
-
-              this.#loop = true
-              this.#state = parserStates.INFO
-              this.run(callback)
-            })
+              },
+              this.#fragmentsBytes
+            )
 
             this.#loop = false
             break
@@ -43354,8 +43742,17 @@ class ByteParser extends Writable {
   }
 
   writeFragments (fragment) {
+    if (
+      this.#maxFragments > 0 &&
+      this.#fragments.length === this.#maxFragments
+    ) {
+      failWebsocketConnection(this.#handler, 1008, 'Too many message fragments')
+      return false
+    }
+
     this.#fragmentsBytes += fragment.length
     this.#fragments.push(fragment)
+    return true
   }
 
   consumeFragments () {
@@ -43994,7 +44391,14 @@ class WebSocketStream {
   #onConnectionEstablished (response, parsedExtensions) {
     this.#handler.socket = response.socket
 
-    const parser = new ByteParser(this.#handler, parsedExtensions)
+    // Get options from dispatcher options
+    const maxFragments = this.#handler.controller.dispatcher?.webSocketOptions?.maxFragments
+    const maxPayloadSize = this.#handler.controller.dispatcher?.webSocketOptions?.maxPayloadSize
+
+    const parser = new ByteParser(this.#handler, parsedExtensions, {
+      maxFragments,
+      maxPayloadSize
+    })
     parser.on('drain', () => this.#handler.onParserDrain())
     parser.on('error', (err) => this.#handler.onParserError(err))
 
@@ -44019,12 +44423,6 @@ class WebSocketStream {
     const readable = new ReadableStream({
       start: (controller) => {
         this.#readableStreamController = controller
-      },
-      pull (controller) {
-        let chunk
-        while (controller.desiredSize > 0 && (chunk = response.socket.read()) !== null) {
-          controller.enqueue(chunk)
-        }
       },
       cancel: (reason) => this.#cancel(reason)
     })
@@ -44074,7 +44472,7 @@ class WebSocketStream {
       try {
         chunk = utf8Decode(data)
       } catch {
-        failWebsocketConnection(this.#handler, 'Received invalid UTF-8 in text frame.')
+        failWebsocketConnection(this.#handler, 1007, 'Received invalid UTF-8 in text frame.')
         return
       }
     } else if (type === opcodes.BINARY) {
@@ -44621,6 +45019,18 @@ const { SendQueue } = __nccwpck_require__(5094)
 const { WebsocketFrameSend } = __nccwpck_require__(6674)
 const { channels } = __nccwpck_require__(8580)
 
+function getSocketAddress (socket) {
+  if (typeof socket?.address === 'function') {
+    return socket.address()
+  }
+
+  if (typeof socket?.session?.socket?.address === 'function') {
+    return socket.session.socket.address()
+  }
+
+  return null
+}
+
 /**
  * @typedef {object} Handler
  * @property {(response: any, extensions?: string[]) => void} onConnectionEstablished
@@ -45052,7 +45462,14 @@ class WebSocket extends EventTarget {
     // once this happens, the connection is open
     this.#handler.socket = response.socket
 
-    const parser = new ByteParser(this.#handler, parsedExtensions)
+    const webSocketOptions = this.#handler.controller.dispatcher?.webSocketOptions
+    const maxFragments = webSocketOptions?.maxFragments
+    const maxPayloadSize = webSocketOptions?.maxPayloadSize
+
+    const parser = new ByteParser(this.#handler, parsedExtensions, {
+      maxFragments,
+      maxPayloadSize
+    })
     parser.on('drain', () => this.#handler.onParserDrain())
     parser.on('error', (err) => this.#handler.onParserError(err))
 
@@ -45087,7 +45504,7 @@ class WebSocket extends EventTarget {
       // Convert headers to a plain object for the event
       const headers = response.headersList.entries
       channels.open.publish({
-        address: response.socket.address(),
+        address: getSocketAddress(response.socket),
         protocol: this.#protocol,
         extensions: this.#extensions,
         websocket: this,
@@ -48978,6 +49395,519 @@ function descending(a, b)
 
 /***/ }),
 
+/***/ 4027:
+/***/ (function(module, __unused_webpack_exports, __nccwpck_require2_) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+const events_1 = __nccwpck_require2_(4434);
+const debug_1 = __importDefault(__nccwpck_require2_(4640));
+const promisify_1 = __importDefault(__nccwpck_require2_(5967));
+const debug = debug_1.default('agent-base');
+function isAgent(v) {
+    return Boolean(v) && typeof v.addRequest === 'function';
+}
+function isSecureEndpoint() {
+    const { stack } = new Error();
+    if (typeof stack !== 'string')
+        return false;
+    return stack.split('\n').some(l => l.indexOf('(https.js:') !== -1 || l.indexOf('node:https:') !== -1);
+}
+function createAgent(callback, opts) {
+    return new createAgent.Agent(callback, opts);
+}
+(function (createAgent) {
+    /**
+     * Base `http.Agent` implementation.
+     * No pooling/keep-alive is implemented by default.
+     *
+     * @param {Function} callback
+     * @api public
+     */
+    class Agent extends events_1.EventEmitter {
+        constructor(callback, _opts) {
+            super();
+            let opts = _opts;
+            if (typeof callback === 'function') {
+                this.callback = callback;
+            }
+            else if (callback) {
+                opts = callback;
+            }
+            // Timeout for the socket to be returned from the callback
+            this.timeout = null;
+            if (opts && typeof opts.timeout === 'number') {
+                this.timeout = opts.timeout;
+            }
+            // These aren't actually used by `agent-base`, but are required
+            // for the TypeScript definition files in `@types/node` :/
+            this.maxFreeSockets = 1;
+            this.maxSockets = 1;
+            this.maxTotalSockets = Infinity;
+            this.sockets = {};
+            this.freeSockets = {};
+            this.requests = {};
+            this.options = {};
+        }
+        get defaultPort() {
+            if (typeof this.explicitDefaultPort === 'number') {
+                return this.explicitDefaultPort;
+            }
+            return isSecureEndpoint() ? 443 : 80;
+        }
+        set defaultPort(v) {
+            this.explicitDefaultPort = v;
+        }
+        get protocol() {
+            if (typeof this.explicitProtocol === 'string') {
+                return this.explicitProtocol;
+            }
+            return isSecureEndpoint() ? 'https:' : 'http:';
+        }
+        set protocol(v) {
+            this.explicitProtocol = v;
+        }
+        callback(req, opts, fn) {
+            throw new Error('"agent-base" has no default implementation, you must subclass and override `callback()`');
+        }
+        /**
+         * Called by node-core's "_http_client.js" module when creating
+         * a new HTTP request with this Agent instance.
+         *
+         * @api public
+         */
+        addRequest(req, _opts) {
+            const opts = Object.assign({}, _opts);
+            if (typeof opts.secureEndpoint !== 'boolean') {
+                opts.secureEndpoint = isSecureEndpoint();
+            }
+            if (opts.host == null) {
+                opts.host = 'localhost';
+            }
+            if (opts.port == null) {
+                opts.port = opts.secureEndpoint ? 443 : 80;
+            }
+            if (opts.protocol == null) {
+                opts.protocol = opts.secureEndpoint ? 'https:' : 'http:';
+            }
+            if (opts.host && opts.path) {
+                // If both a `host` and `path` are specified then it's most
+                // likely the result of a `url.parse()` call... we need to
+                // remove the `path` portion so that `net.connect()` doesn't
+                // attempt to open that as a unix socket file.
+                delete opts.path;
+            }
+            delete opts.agent;
+            delete opts.hostname;
+            delete opts._defaultAgent;
+            delete opts.defaultPort;
+            delete opts.createConnection;
+            // Hint to use "Connection: close"
+            // XXX: non-documented `http` module API :(
+            req._last = true;
+            req.shouldKeepAlive = false;
+            let timedOut = false;
+            let timeoutId = null;
+            const timeoutMs = opts.timeout || this.timeout;
+            const onerror = (err) => {
+                if (req._hadError)
+                    return;
+                req.emit('error', err);
+                // For Safety. Some additional errors might fire later on
+                // and we need to make sure we don't double-fire the error event.
+                req._hadError = true;
+            };
+            const ontimeout = () => {
+                timeoutId = null;
+                timedOut = true;
+                const err = new Error(`A "socket" was not created for HTTP request before ${timeoutMs}ms`);
+                err.code = 'ETIMEOUT';
+                onerror(err);
+            };
+            const callbackError = (err) => {
+                if (timedOut)
+                    return;
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                onerror(err);
+            };
+            const onsocket = (socket) => {
+                if (timedOut)
+                    return;
+                if (timeoutId != null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                if (isAgent(socket)) {
+                    // `socket` is actually an `http.Agent` instance, so
+                    // relinquish responsibility for this `req` to the Agent
+                    // from here on
+                    debug('Callback returned another Agent instance %o', socket.constructor.name);
+                    socket.addRequest(req, opts);
+                    return;
+                }
+                if (socket) {
+                    socket.once('free', () => {
+                        this.freeSocket(socket, opts);
+                    });
+                    req.onSocket(socket);
+                    return;
+                }
+                const err = new Error(`no Duplex stream was returned to agent-base for \`${req.method} ${req.path}\``);
+                onerror(err);
+            };
+            if (typeof this.callback !== 'function') {
+                onerror(new Error('`callback` is not defined'));
+                return;
+            }
+            if (!this.promisifiedCallback) {
+                if (this.callback.length >= 3) {
+                    debug('Converting legacy callback function to promise');
+                    this.promisifiedCallback = promisify_1.default(this.callback);
+                }
+                else {
+                    this.promisifiedCallback = this.callback;
+                }
+            }
+            if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+                timeoutId = setTimeout(ontimeout, timeoutMs);
+            }
+            if ('port' in opts && typeof opts.port !== 'number') {
+                opts.port = Number(opts.port);
+            }
+            try {
+                debug('Resolving socket for %o request: %o', opts.protocol, `${req.method} ${req.path}`);
+                Promise.resolve(this.promisifiedCallback(req, opts)).then(onsocket, callbackError);
+            }
+            catch (err) {
+                Promise.reject(err).catch(callbackError);
+            }
+        }
+        freeSocket(socket, opts) {
+            debug('Freeing socket %o %o', socket.constructor.name, opts);
+            socket.destroy();
+        }
+        destroy() {
+            debug('Destroying agent %o', this.constructor.name);
+        }
+    }
+    createAgent.Agent = Agent;
+    // So that `instanceof` works correctly
+    createAgent.prototype = createAgent.Agent.prototype;
+})(createAgent || (createAgent = {}));
+module.exports = createAgent;
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 5967:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+function promisify(fn) {
+    return function (req, opts) {
+        return new Promise((resolve, reject) => {
+            fn.call(this, req, opts, (err, rtn) => {
+                if (err) {
+                    reject(err);
+                }
+                else {
+                    resolve(rtn);
+                }
+            });
+        });
+    };
+}
+exports["default"] = promisify;
+//# sourceMappingURL=promisify.js.map
+
+/***/ }),
+
+/***/ 8116:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require2_) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const net_1 = __importDefault(__nccwpck_require2_(9278));
+const tls_1 = __importDefault(__nccwpck_require2_(4756));
+const url_1 = __importDefault(__nccwpck_require2_(7016));
+const assert_1 = __importDefault(__nccwpck_require2_(2613));
+const debug_1 = __importDefault(__nccwpck_require2_(4640));
+const agent_base_1 = __nccwpck_require2_(4027);
+const parse_proxy_response_1 = __importDefault(__nccwpck_require2_(2891));
+const debug = debug_1.default('https-proxy-agent:agent');
+/**
+ * The `HttpsProxyAgent` implements an HTTP Agent subclass that connects to
+ * the specified "HTTP(s) proxy server" in order to proxy HTTPS requests.
+ *
+ * Outgoing HTTP requests are first tunneled through the proxy server using the
+ * `CONNECT` HTTP request method to establish a connection to the proxy server,
+ * and then the proxy server connects to the destination target and issues the
+ * HTTP request from the proxy server.
+ *
+ * `https:` requests have their socket connection upgraded to TLS once
+ * the connection to the proxy server has been established.
+ *
+ * @api public
+ */
+class HttpsProxyAgent extends agent_base_1.Agent {
+    constructor(_opts) {
+        let opts;
+        if (typeof _opts === 'string') {
+            opts = url_1.default.parse(_opts);
+        }
+        else {
+            opts = _opts;
+        }
+        if (!opts) {
+            throw new Error('an HTTP(S) proxy server `host` and `port` must be specified!');
+        }
+        debug('creating new HttpsProxyAgent instance: %o', opts);
+        super(opts);
+        const proxy = Object.assign({}, opts);
+        // If `true`, then connect to the proxy server over TLS.
+        // Defaults to `false`.
+        this.secureProxy = opts.secureProxy || isHTTPS(proxy.protocol);
+        // Prefer `hostname` over `host`, and set the `port` if needed.
+        proxy.host = proxy.hostname || proxy.host;
+        if (typeof proxy.port === 'string') {
+            proxy.port = parseInt(proxy.port, 10);
+        }
+        if (!proxy.port && proxy.host) {
+            proxy.port = this.secureProxy ? 443 : 80;
+        }
+        // ALPN is supported by Node.js >= v5.
+        // attempt to negotiate http/1.1 for proxy servers that support http/2
+        if (this.secureProxy && !('ALPNProtocols' in proxy)) {
+            proxy.ALPNProtocols = ['http 1.1'];
+        }
+        if (proxy.host && proxy.path) {
+            // If both a `host` and `path` are specified then it's most likely
+            // the result of a `url.parse()` call... we need to remove the
+            // `path` portion so that `net.connect()` doesn't attempt to open
+            // that as a Unix socket file.
+            delete proxy.path;
+            delete proxy.pathname;
+        }
+        this.proxy = proxy;
+    }
+    /**
+     * Called when the node-core HTTP client library is creating a
+     * new HTTP request.
+     *
+     * @api protected
+     */
+    callback(req, opts) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { proxy, secureProxy } = this;
+            // Create a socket connection to the proxy server.
+            let socket;
+            if (secureProxy) {
+                debug('Creating `tls.Socket`: %o', proxy);
+                socket = tls_1.default.connect(proxy);
+            }
+            else {
+                debug('Creating `net.Socket`: %o', proxy);
+                socket = net_1.default.connect(proxy);
+            }
+            const headers = Object.assign({}, proxy.headers);
+            const hostname = `${opts.host}:${opts.port}`;
+            let payload = `CONNECT ${hostname} HTTP/1.1\r\n`;
+            // Inject the `Proxy-Authorization` header if necessary.
+            if (proxy.auth) {
+                headers['Proxy-Authorization'] = `Basic ${Buffer.from(proxy.auth).toString('base64')}`;
+            }
+            // The `Host` header should only include the port
+            // number when it is not the default port.
+            let { host, port, secureEndpoint } = opts;
+            if (!isDefaultPort(port, secureEndpoint)) {
+                host += `:${port}`;
+            }
+            headers.Host = host;
+            headers.Connection = 'close';
+            for (const name of Object.keys(headers)) {
+                payload += `${name}: ${headers[name]}\r\n`;
+            }
+            const proxyResponsePromise = parse_proxy_response_1.default(socket);
+            socket.write(`${payload}\r\n`);
+            const { statusCode, buffered } = yield proxyResponsePromise;
+            if (statusCode === 200) {
+                req.once('socket', resume);
+                if (opts.secureEndpoint) {
+                    // The proxy is connecting to a TLS server, so upgrade
+                    // this socket connection to a TLS connection.
+                    debug('Upgrading socket connection to TLS');
+                    const servername = opts.servername || opts.host;
+                    return tls_1.default.connect(Object.assign(Object.assign({}, omit(opts, 'host', 'hostname', 'path', 'port')), { socket,
+                        servername }));
+                }
+                return socket;
+            }
+            // Some other status code that's not 200... need to re-play the HTTP
+            // header "data" events onto the socket once the HTTP machinery is
+            // attached so that the node core `http` can parse and handle the
+            // error status code.
+            // Close the original socket, and a new "fake" socket is returned
+            // instead, so that the proxy doesn't get the HTTP request
+            // written to it (which may contain `Authorization` headers or other
+            // sensitive data).
+            //
+            // See: https://hackerone.com/reports/541502
+            socket.destroy();
+            const fakeSocket = new net_1.default.Socket({ writable: false });
+            fakeSocket.readable = true;
+            // Need to wait for the "socket" event to re-play the "data" events.
+            req.once('socket', (s) => {
+                debug('replaying proxy buffer for failed request');
+                assert_1.default(s.listenerCount('data') > 0);
+                // Replay the "buffered" Buffer onto the fake `socket`, since at
+                // this point the HTTP module machinery has been hooked up for
+                // the user.
+                s.push(buffered);
+                s.push(null);
+            });
+            return fakeSocket;
+        });
+    }
+}
+exports["default"] = HttpsProxyAgent;
+function resume(socket) {
+    socket.resume();
+}
+function isDefaultPort(port, secure) {
+    return Boolean((!secure && port === 80) || (secure && port === 443));
+}
+function isHTTPS(protocol) {
+    return typeof protocol === 'string' ? /^https:?$/i.test(protocol) : false;
+}
+function omit(obj, ...keys) {
+    const ret = {};
+    let key;
+    for (key in obj) {
+        if (!keys.includes(key)) {
+            ret[key] = obj[key];
+        }
+    }
+    return ret;
+}
+//# sourceMappingURL=agent.js.map
+
+/***/ }),
+
+/***/ 2649:
+/***/ (function(module, __unused_webpack_exports, __nccwpck_require2_) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+const agent_1 = __importDefault(__nccwpck_require2_(8116));
+function createHttpsProxyAgent(opts) {
+    return new agent_1.default(opts);
+}
+(function (createHttpsProxyAgent) {
+    createHttpsProxyAgent.HttpsProxyAgent = agent_1.default;
+    createHttpsProxyAgent.prototype = agent_1.default.prototype;
+})(createHttpsProxyAgent || (createHttpsProxyAgent = {}));
+module.exports = createHttpsProxyAgent;
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 2891:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require2_) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const debug_1 = __importDefault(__nccwpck_require2_(4640));
+const debug = debug_1.default('https-proxy-agent:parse-proxy-response');
+function parseProxyResponse(socket) {
+    return new Promise((resolve, reject) => {
+        // we need to buffer any HTTP traffic that happens with the proxy before we get
+        // the CONNECT response, so that if the response is anything other than an "200"
+        // response code, then we can re-play the "data" events on the socket once the
+        // HTTP parser is hooked up...
+        let buffersLength = 0;
+        const buffers = [];
+        function read() {
+            const b = socket.read();
+            if (b)
+                ondata(b);
+            else
+                socket.once('readable', read);
+        }
+        function cleanup() {
+            socket.removeListener('end', onend);
+            socket.removeListener('error', onerror);
+            socket.removeListener('close', onclose);
+            socket.removeListener('readable', read);
+        }
+        function onclose(err) {
+            debug('onclose had error %o', err);
+        }
+        function onend() {
+            debug('onend');
+        }
+        function onerror(err) {
+            cleanup();
+            debug('onerror %o', err);
+            reject(err);
+        }
+        function ondata(b) {
+            buffers.push(b);
+            buffersLength += b.length;
+            const buffered = Buffer.concat(buffers, buffersLength);
+            const endOfHeaders = buffered.indexOf('\r\n\r\n');
+            if (endOfHeaders === -1) {
+                // keep buffering
+                debug('have not received end of HTTP headers yet...');
+                read();
+                return;
+            }
+            const firstLine = buffered.toString('ascii', 0, buffered.indexOf('\r\n'));
+            const statusCode = +firstLine.split(' ')[1];
+            debug('got proxy server response: %o', firstLine);
+            resolve({
+                statusCode,
+                buffered
+            });
+        }
+        socket.on('error', onerror);
+        socket.on('close', onclose);
+        socket.on('end', onend);
+        read();
+    });
+}
+exports["default"] = parseProxyResponse;
+//# sourceMappingURL=parse-proxy-response.js.map
+
+/***/ }),
+
 /***/ 1909:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require2_) => {
 
@@ -51208,6 +52138,18 @@ var hasOwn = __nccwpck_require2_(8714);
 var populate = __nccwpck_require2_(9341);
 
 /**
+ * Escape CR, LF, and `"` in a multipart `name`/`filename` parameter, so a field
+ * name or filename can not break out of its header line to inject headers or
+ * smuggle additional parts. Matches the WHATWG HTML multipart/form-data encoding.
+ *
+ * @param {string} str - the parameter value to escape
+ * @returns {string} the escaped value
+ */
+function escapeHeaderParam(str) {
+  return String(str).replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/"/g, '%22');
+}
+
+/**
  * Create readable "multipart/form-data" streams.
  * Can be used to submit forms
  * and file uploads to other web applications.
@@ -51372,7 +52314,7 @@ FormData.prototype._multiPartHeader = function (field, value, options) {
   var contents = '';
   var headers = {
     // add custom disposition as third element or keep it two elements if not
-    'Content-Disposition': ['form-data', 'name="' + field + '"'].concat(contentDisposition || []),
+    'Content-Disposition': ['form-data', 'name="' + escapeHeaderParam(field) + '"'].concat(contentDisposition || []),
     // if no content type. allow it to be empty array
     'Content-Type': [].concat(contentType || [])
   };
@@ -51426,7 +52368,7 @@ FormData.prototype._getContentDisposition = function (value, options) { // eslin
   }
 
   if (filename) {
-    return 'filename="' + filename + '"';
+    return 'filename="' + escapeHeaderParam(filename) + '"';
   }
 };
 
@@ -54042,7 +54984,7 @@ class RequestHandler extends AsyncResource {
         throw new InvalidArgumentError('invalid callback')
       }
 
-      if (highWaterMark && (typeof highWaterMark !== 'number' || highWaterMark < 0)) {
+      if (highWaterMark != null && (!Number.isFinite(highWaterMark) || highWaterMark < 0)) {
         throw new InvalidArgumentError('invalid highWaterMark')
       }
 
@@ -55640,7 +56582,7 @@ module.exports = class SqliteCacheStore {
           SELECT
             id
           FROM cacheInterceptorV${VERSION}
-          ORDER BY cachedAt DESC
+          ORDER BY cachedAt ASC
           LIMIT ?
         )
       `)
@@ -55707,7 +56649,6 @@ module.exports = class SqliteCacheStore {
         existingValue.id
       )
     } else {
-      this.#prune()
       // New response, let's insert it
       this.#insertValueQuery.run(
         url,
@@ -55723,6 +56664,7 @@ module.exports = class SqliteCacheStore {
         value.cachedAt,
         value.staleAt
       )
+      this.#prune()
     }
   }
 
@@ -55833,7 +56775,7 @@ module.exports = class SqliteCacheStore {
     const now = Date.now()
     for (const value of values) {
       if (now >= value.deleteAt && !canBeExpired) {
-        return undefined
+        continue
       }
 
       let matches = true
@@ -55929,6 +56871,22 @@ const SessionCache = class WeakSessionCache {
   set (sessionKey, session) {
     if (this._maxCachedSessions === 0) {
       return
+    }
+
+    if (this._sessionCache.has(sessionKey)) {
+      this._sessionCache.delete(sessionKey)
+    } else if (this._sessionCache.size >= this._maxCachedSessions) {
+      for (const [key, ref] of this._sessionCache) {
+        if (ref.deref() === undefined) {
+          this._sessionCache.delete(key)
+          return
+        }
+      }
+
+      const oldest = this._sessionCache.keys().next()
+      if (!oldest.done) {
+        this._sessionCache.delete(oldest.value)
+      }
     }
 
     this._sessionCache.set(sessionKey, new WeakRef(session))
@@ -56366,10 +57324,12 @@ function trackWebSocketEvents (debugLog = websocketDebuglog) {
 
   diagnosticsChannel.subscribe('undici:websocket:open',
     evt => {
-      const {
-        address: { address, port }
-      } = evt
-      debugLog('connection opened %s%s', address, port ? `:${port}` : '')
+      if (evt.address != null) {
+        const { address, port } = evt.address
+        debugLog('connection opened %s%s', address, port ? `:${port}` : '')
+      } else {
+        debugLog('connection opened')
+      }
     })
 
   diagnosticsChannel.subscribe('undici:websocket:close',
@@ -56934,6 +57894,21 @@ const { headerNameLowerCasedRecord } = __nccwpck_require2_(1045)
 // Verifies that a given path is valid does not contain control chars \x00 to \x20
 const invalidPathRegex = /[^\u0021-\u00ff]/
 
+function isValidContentLengthHeaderValue (val) {
+  if (typeof val !== 'string' || val.length === 0) {
+    return false
+  }
+
+  for (let i = 0; i < val.length; i++) {
+    const charCode = val.charCodeAt(i)
+    if (charCode < 48 || charCode > 57) {
+      return false
+    }
+  }
+
+  return true
+}
+
 const kHandler = Symbol('handler')
 
 class Request {
@@ -57309,23 +58284,31 @@ function processHeader (request, key, val) {
     if (request.contentLength !== null) {
       throw new InvalidArgumentError('duplicate content-length header')
     }
-    request.contentLength = parseInt(val, 10)
-    if (!Number.isFinite(request.contentLength)) {
+    if (!isValidContentLengthHeaderValue(val)) {
       throw new InvalidArgumentError('invalid content-length header')
     }
+    request.contentLength = parseInt(val, 10)
   } else if (request.contentType === null && headerName === 'content-type') {
     request.contentType = val
     request.headers.push(key, val)
   } else if (headerName === 'transfer-encoding' || headerName === 'keep-alive' || headerName === 'upgrade') {
     throw new InvalidArgumentError(`invalid ${headerName} header`)
   } else if (headerName === 'connection') {
-    const value = typeof val === 'string' ? val.toLowerCase() : null
-    if (value !== 'close' && value !== 'keep-alive') {
+    // Per RFC 7230 Section 6.1, Connection header can contain
+    // a comma-separated list of connection option tokens (header names)
+    const value = typeof val === 'string' ? val : null
+    if (value === null) {
       throw new InvalidArgumentError('invalid connection header')
     }
 
-    if (value === 'close') {
-      request.reset = true
+    for (const token of value.toLowerCase().split(',')) {
+      const trimmed = token.trim()
+      if (!isValidHTTPToken(trimmed)) {
+        throw new InvalidArgumentError('invalid connection header')
+      }
+      if (trimmed === 'close') {
+        request.reset = true
+      }
     }
   } else if (headerName === 'expect') {
     throw new NotSupportedError('expect header not supported')
@@ -57352,6 +58335,7 @@ const { debuglog } = __nccwpck_require2_(7975)
 const { parseAddress } = __nccwpck_require2_(8102)
 
 const debug = debuglog('undici:socks5')
+const EMPTY_BUFFER = Buffer.alloc(0)
 
 // SOCKS5 constants
 const SOCKS_VERSION = 0x05
@@ -57396,6 +58380,7 @@ const STATES = {
   INITIAL: 'initial',
   HANDSHAKING: 'handshaking',
   AUTHENTICATING: 'authenticating',
+  AUTHENTICATED: 'authenticated',
   CONNECTING: 'connecting',
   CONNECTED: 'connected',
   ERROR: 'error',
@@ -57417,7 +58402,10 @@ class Socks5Client extends EventEmitter {
     this.socket = socket
     this.options = options
     this.state = STATES.INITIAL
-    this.buffer = Buffer.alloc(0)
+    this.buffer = EMPTY_BUFFER
+    this.onSocketData = this.onData.bind(this)
+    this.onSocketError = this.onError.bind(this)
+    this.onSocketClose = this.onClose.bind(this)
 
     // Authentication settings
     this.authMethods = []
@@ -57427,9 +58415,9 @@ class Socks5Client extends EventEmitter {
     this.authMethods.push(AUTH_METHODS.NO_AUTH)
 
     // Socket event handlers
-    this.socket.on('data', this.onData.bind(this))
-    this.socket.on('error', this.onError.bind(this))
-    this.socket.on('close', this.onClose.bind(this))
+    this.socket.on('data', this.onSocketData)
+    this.socket.on('error', this.onSocketError)
+    this.socket.on('close', this.onSocketClose)
   }
 
   /**
@@ -57484,6 +58472,11 @@ class Socks5Client extends EventEmitter {
     }
   }
 
+  markAuthenticated () {
+    this.state = STATES.AUTHENTICATED
+    this.emit('authenticated')
+  }
+
   /**
    * Start the SOCKS5 handshake
    */
@@ -57534,7 +58527,7 @@ class Socks5Client extends EventEmitter {
     debug('server selected auth method', method)
 
     if (method === AUTH_METHODS.NO_AUTH) {
-      this.emit('authenticated')
+      this.markAuthenticated()
     } else if (method === AUTH_METHODS.USERNAME_PASSWORD) {
       this.state = STATES.AUTHENTICATING
       this.sendAuthRequest()
@@ -57599,7 +58592,7 @@ class Socks5Client extends EventEmitter {
 
     this.buffer = this.buffer.subarray(2)
     debug('authentication successful')
-    this.emit('authenticated')
+    this.markAuthenticated()
   }
 
   /**
@@ -57608,8 +58601,12 @@ class Socks5Client extends EventEmitter {
    * @param {number} port - Target port
    */
   connect (address, port) {
-    if (this.state === STATES.CONNECTED) {
-      throw new InvalidArgumentError('Already connected')
+    if (this.state === STATES.CONNECTING || this.state === STATES.CONNECTED) {
+      throw new InvalidArgumentError('Connection already in progress')
+    }
+
+    if (this.state !== STATES.AUTHENTICATED) {
+      throw new InvalidArgumentError('Client must be authenticated before CONNECT')
     }
 
     debug('connecting to', address, port)
@@ -57708,8 +58705,9 @@ class Socks5Client extends EventEmitter {
 
     const boundPort = this.buffer.readUInt16BE(offset)
 
-    this.buffer = this.buffer.subarray(responseLength)
+    this.buffer = EMPTY_BUFFER
     this.state = STATES.CONNECTED
+    this.socket.removeListener('data', this.onSocketData)
 
     debug('connected, bound address:', boundAddress, 'port:', boundPort)
     this.emit('connected', { address: boundAddress, port: boundPort })
@@ -57806,34 +58804,43 @@ function parseAddress (address) {
  */
 function parseIPv6 (address) {
   const buffer = Buffer.alloc(16)
-  const parts = address.split(':')
-  let partIndex = 0
-  let bufferIndex = 0
+  let normalizedAddress = address
+
+  // Expand an embedded IPv4 tail into the last two IPv6 groups.
+  if (address.includes('.')) {
+    const lastColonIndex = address.lastIndexOf(':')
+    const ipv4Part = address.slice(lastColonIndex + 1)
+
+    if (net.isIPv4(ipv4Part)) {
+      const octets = ipv4Part.split('.').map(Number)
+      const high = ((octets[0] << 8) | octets[1]).toString(16)
+      const low = ((octets[2] << 8) | octets[3]).toString(16)
+      normalizedAddress = `${address.slice(0, lastColonIndex)}:${high}:${low}`
+    }
+  }
 
   // Handle compressed notation (::)
-  const doubleColonIndex = address.indexOf('::')
+  const doubleColonIndex = normalizedAddress.indexOf('::')
   if (doubleColonIndex !== -1) {
-    // Count non-empty parts
-    const nonEmptyParts = parts.filter(p => p.length > 0).length
-    const skipParts = 8 - nonEmptyParts
+    const before = normalizedAddress.slice(0, doubleColonIndex)
+    const after = normalizedAddress.slice(doubleColonIndex + 2)
+    const beforeParts = before === '' ? [] : before.split(':')
+    const afterParts = after === '' ? [] : after.split(':')
 
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === '' && i === doubleColonIndex / 3) {
-        // Skip empty parts for ::
-        bufferIndex += skipParts * 2
-      } else if (parts[i] !== '') {
-        const value = parseInt(parts[i], 16)
-        buffer.writeUInt16BE(value, bufferIndex)
-        bufferIndex += 2
-      }
+    let bufferIndex = 0
+    for (const part of beforeParts) {
+      buffer.writeUInt16BE(parseInt(part, 16), bufferIndex)
+      bufferIndex += 2
+    }
+    bufferIndex = 16 - afterParts.length * 2
+    for (const part of afterParts) {
+      buffer.writeUInt16BE(parseInt(part, 16), bufferIndex)
+      bufferIndex += 2
     }
   } else {
-    // No compression, parse normally
-    for (const part of parts) {
-      if (part === '') continue
-      const value = parseInt(part, 16)
-      buffer.writeUInt16BE(value, partIndex * 2)
-      partIndex++
+    const parts = normalizedAddress.split(':')
+    for (let i = 0; i < parts.length; i++) {
+      buffer.writeUInt16BE(parseInt(parts[i], 16), i * 2)
     }
   }
 
@@ -58662,19 +59669,39 @@ function parseHeaders (headers, obj) {
     const key = headerNameToString(headers[i])
     let val = obj[key]
 
-    if (val) {
-      if (typeof val === 'string') {
-        val = [val]
-        obj[key] = val
-      }
-      val.push(headers[i + 1].toString('latin1'))
-    } else {
-      const headersValue = headers[i + 1]
-      if (typeof headersValue === 'string') {
-        obj[key] = headersValue
+    if (val !== undefined) {
+      if (!Object.hasOwn(obj, key)) {
+        const headersValue = typeof headers[i + 1] === 'string'
+          ? headers[i + 1]
+          : Array.isArray(headers[i + 1])
+            ? headers[i + 1].map(x => x.toString('latin1'))
+            : headers[i + 1].toString('latin1')
+
+        if (key === '__proto__') {
+          Object.defineProperty(obj, key, {
+            value: headersValue,
+            enumerable: true,
+            configurable: true,
+            writable: true
+          })
+        } else {
+          obj[key] = headersValue
+        }
       } else {
-        obj[key] = Array.isArray(headersValue) ? headersValue.map(x => x.toString('latin1')) : headersValue.toString('latin1')
+        if (typeof val === 'string') {
+          val = [val]
+          obj[key] = val
+        }
+        val.push(headers[i + 1].toString('latin1'))
       }
+    } else {
+      const headersValue = typeof headers[i + 1] === 'string'
+        ? headers[i + 1]
+        : Array.isArray(headers[i + 1])
+          ? headers[i + 1].map(x => x.toString('latin1'))
+          : headers[i + 1].toString('latin1')
+
+      obj[key] = headersValue
     }
   }
 
@@ -59237,7 +60264,7 @@ class Agent extends DispatcherBase {
       throw new InvalidArgumentError('maxOrigins must be a number greater than 0')
     }
 
-    super()
+    super(options)
 
     if (connect && typeof connect !== 'function') {
       connect = { ...connect }
@@ -59422,7 +60449,7 @@ class BalancedPool extends PoolBase {
       throw new InvalidArgumentError('factory must be a function.')
     }
 
-    super()
+    super(opts)
 
     this[kOptions] = { ...util.deepClone(opts) }
     this[kOptions].interceptors = opts.interceptors
@@ -59652,6 +60679,9 @@ const constants = __nccwpck_require2_(2418)
 const EMPTY_BUF = Buffer.alloc(0)
 const FastBuffer = Buffer[Symbol.species]
 const removeAllListeners = util.removeAllListeners
+const kIdleSocketValidation = Symbol('kIdleSocketValidation')
+const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout')
+const kSocketUsed = Symbol('kSocketUsed')
 
 let extractBody
 
@@ -59664,9 +60694,9 @@ function lazyllhttp () {
   let useWasmSIMD = process.arch !== 'ppc64'
   // The Env Variable UNDICI_NO_WASM_SIMD allows explicitly overriding the default behavior
   if (process.env.UNDICI_NO_WASM_SIMD === '1') {
-    useWasmSIMD = true
-  } else if (process.env.UNDICI_NO_WASM_SIMD === '0') {
     useWasmSIMD = false
+  } else if (process.env.UNDICI_NO_WASM_SIMD === '0') {
+    useWasmSIMD = true
   }
 
   if (useWasmSIMD) {
@@ -59811,6 +60841,7 @@ class Parser {
      */
     this.socket = socket
     this.timeout = null
+    this.timeoutWeakRef = new WeakRef(this)
     this.timeoutValue = null
     this.timeoutType = null
     this.statusCode = 0
@@ -59848,9 +60879,9 @@ class Parser {
 
       if (delay) {
         if (type & USE_FAST_TIMER) {
-          this.timeout = timers.setFastTimeout(onParserTimeout, delay, new WeakRef(this))
+          this.timeout = timers.setFastTimeout(onParserTimeout, delay, this.timeoutWeakRef)
         } else {
-          this.timeout = setTimeout(onParserTimeout, delay, new WeakRef(this))
+          this.timeout = setTimeout(onParserTimeout, delay, this.timeoutWeakRef)
           this.timeout?.unref()
         }
       }
@@ -59944,21 +60975,60 @@ class Parser {
           this.paused = true
           socket.unshift(data)
         } else {
-          const ptr = llhttp.llhttp_get_error_reason(this.ptr)
-          let message = ''
-          if (ptr) {
-            const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
-            message =
-              'Response does not match the HTTP/1.1 protocol (' +
-              Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-              ')'
-          }
-          throw new HTTPParserError(message, constants.ERROR[ret], data)
+          throw this.createError(ret, data)
         }
       }
     } catch (err) {
       util.destroy(socket, err)
     }
+  }
+
+  finish () {
+    assert(currentParser === null)
+    assert(this.ptr != null)
+    assert(!this.paused)
+
+    const { llhttp } = this
+
+    let ret
+
+    try {
+      currentParser = this
+      ret = llhttp.llhttp_finish(this.ptr)
+    } finally {
+      currentParser = null
+    }
+
+    if (ret === constants.ERROR.OK) {
+      return null
+    }
+
+    if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+      this.paused = true
+      return null
+    }
+
+    return this.createError(ret, EMPTY_BUF)
+  }
+
+  createError (ret, data) {
+    const { llhttp, contentLength, bytesRead } = this
+
+    if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+      return new ResponseContentLengthMismatchError()
+    }
+
+    const ptr = llhttp.llhttp_get_error_reason(this.ptr)
+    let message = ''
+    if (ptr) {
+      const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
+      message =
+        'Response does not match the HTTP/1.1 protocol (' +
+        Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+        ')'
+    }
+
+    return new HTTPParserError(message, constants.ERROR[ret], data)
   }
 
   destroy () {
@@ -59992,6 +61062,11 @@ class Parser {
     const { socket, client } = this
 
     if (socket.destroyed) {
+      return -1
+    }
+
+    if (client[kRunning] === 0) {
+      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)))
       return -1
     }
 
@@ -60120,6 +61195,11 @@ class Parser {
     const { client, socket, headers, statusText } = this
 
     if (socket.destroyed) {
+      return -1
+    }
+
+    if (client[kRunning] === 0) {
+      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)))
       return -1
     }
 
@@ -60301,6 +61381,7 @@ class Parser {
     request.onComplete(headers)
 
     client[kQueue][client[kRunningIdx]++] = null
+    socket[kSocketUsed] = client[kPending] === 0
 
     if (socket[kWriting]) {
       assert(client[kRunning] === 0)
@@ -60377,6 +61458,9 @@ function connectH1 (client, socket) {
   socket[kWriting] = false
   socket[kReset] = false
   socket[kBlocking] = false
+  socket[kIdleSocketValidation] = 0
+  socket[kIdleSocketValidationTimeout] = null
+  socket[kSocketUsed] = false
   socket[kParser] = new Parser(client, socket, llhttpInstance)
 
   util.addListener(socket, 'error', onHttpSocketError)
@@ -60419,7 +61503,7 @@ function connectH1 (client, socket) {
      * @returns {boolean}
      */
     busy (request) {
-      if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+      if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
         return true
       }
 
@@ -60465,8 +61549,11 @@ function onHttpSocketError (err) {
   // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
   // to the user.
   if (err.code === 'ECONNRESET' && parser.statusCode && !parser.shouldKeepAlive) {
-    // We treat all incoming data so for as a valid response.
-    parser.onMessageComplete()
+    const parserErr = parser.finish()
+    if (parserErr) {
+      this[kError] = parserErr
+      this[kClient][kOnError](parserErr)
+    }
     return
   }
 
@@ -60483,8 +61570,10 @@ function onHttpSocketEnd () {
   const parser = this[kParser]
 
   if (parser.statusCode && !parser.shouldKeepAlive) {
-    // We treat all incoming data so far as a valid response.
-    parser.onMessageComplete()
+    const parserErr = parser.finish()
+    if (parserErr) {
+      util.destroy(this, parserErr)
+    }
     return
   }
 
@@ -60494,10 +61583,11 @@ function onHttpSocketEnd () {
 function onHttpSocketClose () {
   const parser = this[kParser]
 
+  clearIdleSocketValidation(this)
+
   if (parser) {
     if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-      // We treat all incoming data so far as a valid response.
-      parser.onMessageComplete()
+      this[kError] = parser.finish() || this[kError]
     }
 
     this[kParser].destroy()
@@ -60541,6 +61631,28 @@ function onSocketClose () {
   this[kClosed] = true
 }
 
+function clearIdleSocketValidation (socket) {
+  if (socket[kIdleSocketValidationTimeout]) {
+    clearTimeout(socket[kIdleSocketValidationTimeout])
+    socket[kIdleSocketValidationTimeout] = null
+  }
+
+  socket[kIdleSocketValidation] = 0
+}
+
+function scheduleIdleSocketValidation (client, socket) {
+  socket[kIdleSocketValidation] = 1
+  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+    socket[kIdleSocketValidationTimeout] = null
+    socket[kIdleSocketValidation] = 2
+
+    if (client[kSocket] === socket && !socket.destroyed) {
+      client[kResume]()
+    }
+  }, 0)
+  socket[kIdleSocketValidationTimeout].unref?.()
+}
+
 /**
  * @param {import('./client.js')} client
  */
@@ -60556,6 +61668,32 @@ function resumeH1 (client) {
     } else if (socket[kNoRef] && socket.ref) {
       socket.ref()
       socket[kNoRef] = false
+    }
+
+    if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+      if (socket[kIdleSocketValidation] === 0) {
+        scheduleIdleSocketValidation(client, socket)
+        socket[kParser].readMore()
+        if (socket.destroyed) {
+          return
+        }
+        return
+      }
+
+      if (socket[kIdleSocketValidation] === 1) {
+        socket[kParser].readMore()
+        if (socket.destroyed) {
+          return
+        }
+        return
+      }
+    }
+
+    if (client[kRunning] === 0) {
+      socket[kParser].readMore()
+      if (socket.destroyed) {
+        return
+      }
     }
 
     if (client[kSize] === 0) {
@@ -60656,6 +61794,7 @@ function writeH1 (client, request) {
   }
 
   const socket = client[kSocket]
+  clearIdleSocketValidation(socket)
 
   /**
    * @param {Error} [err]
@@ -62330,7 +63469,8 @@ class Client extends DispatcherBase {
     useH2c,
     initialWindowSize,
     connectionWindowSize,
-    pingInterval
+    pingInterval,
+    webSocket
   } = {}) {
     if (keepAlive !== undefined) {
       throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -62438,7 +63578,7 @@ class Client extends DispatcherBase {
       throw new InvalidArgumentError('pingInterval must be a positive integer, greater or equal to 0')
     }
 
-    super()
+    super({ webSocket })
 
     if (typeof connect !== 'function') {
       connect = buildConnector({
@@ -62451,9 +63591,13 @@ class Client extends DispatcherBase {
         ...(typeof autoSelectFamily === 'boolean' ? { autoSelectFamily, autoSelectFamilyAttemptTimeout } : undefined),
         ...connect
       })
-    } else if (socketPath != null) {
+    } else {
       const customConnect = connect
-      connect = (opts, callback) => customConnect({ ...opts, socketPath }, callback)
+      connect = (opts, callback) => customConnect({
+        ...opts,
+        ...(socketPath != null ? { socketPath } : null),
+        ...(allowH2 != null ? { allowH2 } : null)
+      }, callback)
     }
 
     this[kUrl] = util.parseOrigin(url)
@@ -62668,65 +63812,70 @@ function connect (client) {
     })
   }
 
-  client[kConnector]({
-    host,
-    hostname,
-    protocol,
-    port,
-    servername: client[kServerName],
-    localAddress: client[kLocalAddress]
-  }, (err, socket) => {
-    if (err) {
-      handleConnectError(client, err, { host, hostname, protocol, port })
+  try {
+    client[kConnector]({
+      host,
+      hostname,
+      protocol,
+      port,
+      servername: client[kServerName],
+      localAddress: client[kLocalAddress]
+    }, (err, socket) => {
+      if (err) {
+        handleConnectError(client, err, { host, hostname, protocol, port })
+        client[kResume]()
+        return
+      }
+
+      if (client.destroyed) {
+        util.destroy(socket.on('error', noop), new ClientDestroyedError())
+        client[kResume]()
+        return
+      }
+
+      assert(socket)
+
+      try {
+        client[kHTTPContext] = socket.alpnProtocol === 'h2'
+          ? connectH2(client, socket)
+          : connectH1(client, socket)
+      } catch (err) {
+        socket.destroy().on('error', noop)
+        handleConnectError(client, err, { host, hostname, protocol, port })
+        client[kResume]()
+        return
+      }
+
+      client[kConnecting] = false
+
+      socket[kCounter] = 0
+      socket[kMaxRequests] = client[kMaxRequests]
+      socket[kClient] = client
+      socket[kError] = null
+
+      if (channels.connected.hasSubscribers) {
+        channels.connected.publish({
+          connectParams: {
+            host,
+            hostname,
+            protocol,
+            port,
+            version: client[kHTTPContext]?.version,
+            servername: client[kServerName],
+            localAddress: client[kLocalAddress]
+          },
+          connector: client[kConnector],
+          socket
+        })
+      }
+
+      client.emit('connect', client[kUrl], [client])
       client[kResume]()
-      return
-    }
-
-    if (client.destroyed) {
-      util.destroy(socket.on('error', noop), new ClientDestroyedError())
-      client[kResume]()
-      return
-    }
-
-    assert(socket)
-
-    try {
-      client[kHTTPContext] = socket.alpnProtocol === 'h2'
-        ? connectH2(client, socket)
-        : connectH1(client, socket)
-    } catch (err) {
-      socket.destroy().on('error', noop)
-      handleConnectError(client, err, { host, hostname, protocol, port })
-      client[kResume]()
-      return
-    }
-
-    client[kConnecting] = false
-
-    socket[kCounter] = 0
-    socket[kMaxRequests] = client[kMaxRequests]
-    socket[kClient] = client
-    socket[kError] = null
-
-    if (channels.connected.hasSubscribers) {
-      channels.connected.publish({
-        connectParams: {
-          host,
-          hostname,
-          protocol,
-          port,
-          version: client[kHTTPContext]?.version,
-          servername: client[kServerName],
-          localAddress: client[kLocalAddress]
-        },
-        connector: client[kConnector],
-        socket
-      })
-    }
-
-    client.emit('connect', client[kUrl], [client])
+    })
+  } catch (err) {
+    handleConnectError(client, err, { host, hostname, protocol, port })
     client[kResume]()
-  })
+  }
 }
 
 function handleConnectError (client, err, { host, hostname, protocol, port }) {
@@ -62889,6 +64038,7 @@ const { kDestroy, kClose, kClosed, kDestroyed, kDispatch } = __nccwpck_require2_
 
 const kOnDestroyed = Symbol('onDestroyed')
 const kOnClosed = Symbol('onClosed')
+const kWebSocketOptions = Symbol('webSocketOptions')
 
 class DispatcherBase extends Dispatcher {
   /** @type {boolean} */
@@ -62902,6 +64052,24 @@ class DispatcherBase extends Dispatcher {
 
   /** @type {Array<Function>|null} */
   [kOnClosed] = null
+
+  /**
+   * @param {import('../../types/dispatcher').DispatcherOptions} [opts]
+   */
+  constructor (opts) {
+    super()
+    this[kWebSocketOptions] = opts?.webSocket ?? {}
+  }
+
+  /**
+   * @returns {import('../../types/dispatcher').WebSocketOptions}
+   */
+  get webSocketOptions () {
+    return {
+      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024 // 128 MB default
+    }
+  }
 
   /** @returns {boolean} */
   get destroyed () {
@@ -63419,7 +64587,7 @@ class H2CClient extends Client {
       )
     }
 
-    const { connect, maxConcurrentStreams, pipelining, ...opts } =
+    const { maxConcurrentStreams, pipelining, ...opts } =
             clientOpts ?? {}
     let defaultMaxConcurrentStreams = 100
     let defaultPipelining = 100
@@ -63748,7 +64916,7 @@ class Pool extends PoolBase {
       })
     }
 
-    super()
+    super(options)
 
     this[kConnections] = connections || null
     this[kUrl] = util.parseOrigin(origin)
@@ -63953,7 +65121,8 @@ class ProxyAgent extends DispatcherBase {
           factory: agentFactory,
           username: opts.username || username,
           password: opts.password || password,
-          proxyTls: opts.proxyTls
+          proxyTls: opts.proxyTls,
+          requestTls: opts.requestTls
         })
       }
 
@@ -64325,13 +65494,12 @@ module.exports = RoundRobinPool
 "use strict";
 
 
-const net = __nccwpck_require2_(7030)
 const { URL } = __nccwpck_require2_(3136)
 
 let tls // include tls conditionally since it is not always available
 const DispatcherBase = __nccwpck_require2_(6720)
 const { InvalidArgumentError } = __nccwpck_require2_(5793)
-const { Socks5Client } = __nccwpck_require2_(9076)
+const { Socks5Client, STATES } = __nccwpck_require2_(9076)
 const { kDispatch, kClose, kDestroy } = __nccwpck_require2_(33)
 const Pool = __nccwpck_require2_(7454)
 const buildConnector = __nccwpck_require2_(6962)
@@ -64342,8 +65510,10 @@ const debug = debuglog('undici:socks5-proxy')
 const kProxyUrl = Symbol('proxy url')
 const kProxyHeaders = Symbol('proxy headers')
 const kProxyAuth = Symbol('proxy auth')
-const kPool = Symbol('pool')
+const kProxyProtocol = Symbol('proxy protocol')
+const kPools = Symbol('pools')
 const kConnector = Symbol('connector')
+const kRequestTls = Symbol('request tls settings')
 
 // Static flag to ensure warning is only emitted once per process
 let experimentalWarningEmitted = false
@@ -64377,6 +65547,8 @@ class Socks5ProxyAgent extends DispatcherBase {
 
     this[kProxyUrl] = url
     this[kProxyHeaders] = options.headers || {}
+    this[kProxyProtocol] = options.proxyTls ? 'https:' : 'http:'
+    this[kRequestTls] = options.requestTls
 
     // Extract auth from URL or options
     this[kProxyAuth] = {
@@ -64390,8 +65562,8 @@ class Socks5ProxyAgent extends DispatcherBase {
       servername: options.proxyTls?.servername || url.hostname
     })
 
-    // Pool for the actual HTTP connections (with SOCKS5 tunnel connect function)
-    this[kPool] = null
+    // Pools for the actual HTTP connections (with SOCKS5 tunnel connect function), keyed by origin
+    this[kPools] = new Map()
   }
 
   /**
@@ -64405,23 +65577,18 @@ class Socks5ProxyAgent extends DispatcherBase {
 
     // Connect to the SOCKS5 proxy
     const socket = await new Promise((resolve, reject) => {
-      const onConnect = () => {
-        socket.removeListener('error', onError)
-        resolve(socket)
-      }
-
-      const onError = (err) => {
-        socket.removeListener('connect', onConnect)
-        reject(err)
-      }
-
-      const socket = net.connect({
+      this[kConnector]({
+        hostname: proxyHost,
         host: proxyHost,
-        port: proxyPort
+        port: proxyPort,
+        protocol: this[kProxyProtocol]
+      }, (err, socket) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(socket)
+        }
       })
-
-      socket.once('connect', onConnect)
-      socket.once('error', onError)
     })
 
     // Create SOCKS5 client
@@ -64455,7 +65622,7 @@ class Socks5ProxyAgent extends DispatcherBase {
       }
 
       // Check if already authenticated (for NO_AUTH method)
-      if (socks5Client.state === 'authenticated') {
+      if (socks5Client.state === STATES.AUTHENTICATED) {
         clearTimeout(timeout)
         resolve()
       } else {
@@ -64496,15 +65663,17 @@ class Socks5ProxyAgent extends DispatcherBase {
   /**
    * Dispatch a request through the SOCKS5 proxy
    */
-  async [kDispatch] (opts, handler) {
+  [kDispatch] (opts, handler) {
     const { origin } = opts
 
     debug('dispatching request to', origin, 'via SOCKS5')
 
     try {
-      // Create Pool with custom connect function if we don't have one yet
-      if (!this[kPool] || this[kPool].destroyed || this[kPool].closed) {
-        this[kPool] = new Pool(origin, {
+      const originKey = String(origin)
+      let pool = this[kPools].get(originKey)
+      // Create a Pool per origin so requests are not routed to the wrong host
+      if (!pool || pool.destroyed || pool.closed) {
+        pool = new Pool(origin, {
           pipelining: opts.pipelining,
           connections: opts.connections,
           connect: async (connectOpts, callback) => {
@@ -64526,9 +65695,9 @@ class Socks5ProxyAgent extends DispatcherBase {
                 }
                 debug('upgrading to TLS')
                 finalSocket = tls.connect({
+                  ...this[kRequestTls],
                   socket,
-                  servername: targetHost,
-                  ...connectOpts.tls || {}
+                  servername: this[kRequestTls]?.servername || targetHost
                 })
 
                 await new Promise((resolve, reject) => {
@@ -64544,14 +65713,19 @@ class Socks5ProxyAgent extends DispatcherBase {
             }
           }
         })
+        this[kPools].set(originKey, pool)
       }
 
-      // Dispatch the request through the pool
-      return this[kPool][kDispatch](opts, handler)
+      // Dispatch the request through the per-origin pool
+      return pool[kDispatch](opts, handler)
     } catch (err) {
       debug('dispatch error:', err)
-      if (typeof handler.onError === 'function') {
+      if (typeof handler.onResponseError === 'function') {
+        handler.onResponseError(null, err)
+        return false
+      } else if (typeof handler.onError === 'function') {
         handler.onError(err)
+        return false
       } else {
         throw err
       }
@@ -64559,15 +65733,21 @@ class Socks5ProxyAgent extends DispatcherBase {
   }
 
   async [kClose] () {
-    if (this[kPool]) {
-      await this[kPool].close()
+    const closePromises = []
+    for (const pool of this[kPools].values()) {
+      closePromises.push(pool.close())
     }
+    this[kPools].clear()
+    await Promise.all(closePromises)
   }
 
   async [kDestroy] (err) {
-    if (this[kPool]) {
-      await this[kPool].destroy(err)
+    const destroyPromises = []
+    for (const pool of this[kPools].values()) {
+      destroyPromises.push(pool.destroy(err))
     }
+    this[kPools].clear()
+    await Promise.all(destroyPromises)
   }
 }
 
@@ -64625,7 +65805,8 @@ module.exports = {
 
 // We include a version number for the Dispatcher API. In case of breaking changes,
 // this version number must be increased to avoid conflicts.
-const globalDispatcher = Symbol.for('undici.globalDispatcher.1')
+const globalDispatcher = Symbol.for('undici.globalDispatcher.2')
+const legacyGlobalDispatcher = Symbol.for('undici.globalDispatcher.1')
 const { InvalidArgumentError } = __nccwpck_require2_(5793)
 const Agent = __nccwpck_require2_(3779)
 
@@ -64637,7 +65818,15 @@ function setGlobalDispatcher (agent) {
   if (!agent || typeof agent.dispatch !== 'function') {
     throw new InvalidArgumentError('Argument agent must implement Agent')
   }
+
   Object.defineProperty(globalThis, globalDispatcher, {
+    value: agent,
+    writable: true,
+    enumerable: false,
+    configurable: false
+  })
+
+  Object.defineProperty(globalThis, legacyGlobalDispatcher, {
     value: agent,
     writable: true,
     enumerable: false,
@@ -64646,7 +65835,7 @@ function setGlobalDispatcher (agent) {
 }
 
 function getGlobalDispatcher () {
-  return globalThis[globalDispatcher]
+  return globalThis[legacyGlobalDispatcher]
 }
 
 // These are the globals that can be installed by undici.install().
@@ -64816,7 +66005,7 @@ class CacheHandler {
     }
 
     const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {}
-    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives)) {
+    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
       return downstreamOnHeaders()
     }
 
@@ -65021,8 +66210,9 @@ class CacheHandler {
  * @param {number} statusCode
  * @param {import('../../types/header.d.ts').IncomingHttpHeaders} resHeaders
  * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives} cacheControlDirectives
+ * @param {import('../../types/header.d.ts').IncomingHttpHeaders} [reqHeaders]
  */
-function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives) {
+function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
   // Status code must be final and understood.
   if (statusCode < 200 || NOT_UNDERSTOOD_STATUS_CODES.includes(statusCode)) {
     return false
@@ -65053,8 +66243,16 @@ function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirect
   }
 
   // https://www.rfc-editor.org/rfc/rfc9111.html#name-storing-responses-to-authen
-  if (resHeaders.authorization) {
-    if (!cacheControlDirectives.public || typeof resHeaders.authorization !== 'string') {
+  if (reqHeaders?.authorization) {
+    if (
+      !cacheControlDirectives.public &&
+      !cacheControlDirectives['s-maxage'] &&
+      !cacheControlDirectives['must-revalidate']
+    ) {
+      return false
+    }
+
+    if (typeof reqHeaders.authorization !== 'string') {
       return false
     }
 
@@ -65174,8 +66372,16 @@ function determineDeleteAt (now, cacheControlDirectives, staleAt) {
     staleIfError = staleAt + (cacheControlDirectives['stale-if-error'] * 1000)
   }
 
-  if (staleWhileRevalidate === -Infinity && staleIfError === -Infinity) {
+  if (cacheControlDirectives.immutable && staleWhileRevalidate === -Infinity && staleIfError === -Infinity) {
     immutable = now + 31536000000
+  }
+
+  // When no stale directives or immutable flag, add a revalidation buffer
+  // equal to the freshness lifetime so the entry survives past staleAt long
+  // enough to be revalidated instead of silently disappearing.
+  if (staleWhileRevalidate === -Infinity && staleIfError === -Infinity && immutable === -Infinity) {
+    const freshnessLifetime = staleAt - now
+    return staleAt + freshnessLifetime
   }
 
   return Math.max(staleAt, staleWhileRevalidate, staleIfError, immutable)
@@ -66586,6 +67792,9 @@ class UnwrapController {
 
   [kResume] = null
 
+  rawHeaders = null
+  rawTrailers = null
+
   constructor (abort) {
     this.#abort = abort
   }
@@ -66645,11 +67854,13 @@ module.exports = class UnwrapHandler {
   }
 
   onUpgrade (statusCode, rawHeaders, socket) {
+    this.#controller.rawHeaders = rawHeaders
     this.#handler.onRequestUpgrade?.(this.#controller, statusCode, parseHeaders(rawHeaders), socket)
   }
 
   onHeaders (statusCode, rawHeaders, resume, statusMessage) {
     this.#controller[kResume] = resume
+    this.#controller.rawHeaders = rawHeaders
     this.#handler.onResponseStart?.(this.#controller, statusCode, parseHeaders(rawHeaders), statusMessage)
     return !this.#controller.paused
   }
@@ -66660,6 +67871,7 @@ module.exports = class UnwrapHandler {
   }
 
   onComplete (rawTrailers) {
+    this.#controller.rawTrailers = rawTrailers
     this.#handler.onResponseEnd?.(this.#controller, parseHeaders(rawTrailers))
   }
 
@@ -69397,14 +70609,14 @@ module.exports = MockAgent
 const { kMockCallHistoryAddLog } = __nccwpck_require2_(7595)
 const { InvalidArgumentError } = __nccwpck_require2_(5793)
 
-function handleFilterCallsWithOptions (criteria, options, handler, store) {
+function handleFilterCallsWithOptions (criteria, options, handler, store, allLogs) {
   switch (options.operator) {
     case 'OR':
-      store.push(...handler(criteria))
+      store.push(...handler(criteria, allLogs))
 
       return store
     case 'AND':
-      return handler.call({ logs: store }, criteria)
+      return handler(criteria, store)
     default:
       // guard -- should never happens because buildAndValidateFilterCallsOptions is called before
       throw new InvalidArgumentError('options.operator must to be a case insensitive string equal to \'OR\' or \'AND\'')
@@ -69429,14 +70641,14 @@ function buildAndValidateFilterCallsOptions (options = {}) {
 }
 
 function makeFilterCalls (parameterName) {
-  return (parameterValue) => {
+  return (parameterValue, logs) => {
     if (typeof parameterValue === 'string' || parameterValue == null) {
-      return this.logs.filter((log) => {
+      return logs.filter((log) => {
         return log[parameterName] === parameterValue
       })
     }
     if (parameterValue instanceof RegExp) {
-      return this.logs.filter((log) => {
+      return logs.filter((log) => {
         return parameterValue.test(log[parameterName])
       })
     }
@@ -69569,30 +70781,30 @@ class MockCallHistory {
 
       const finalOptions = { operator: 'OR', ...buildAndValidateFilterCallsOptions(options) }
 
-      let maybeDuplicatedLogsFiltered = []
+      let maybeDuplicatedLogsFiltered = finalOptions.operator === 'AND' ? this.logs : []
       if ('protocol' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.protocol, finalOptions, this.filterCallsByProtocol, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.protocol, finalOptions, this.filterCallsByProtocol, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('host' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.host, finalOptions, this.filterCallsByHost, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.host, finalOptions, this.filterCallsByHost, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('port' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.port, finalOptions, this.filterCallsByPort, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.port, finalOptions, this.filterCallsByPort, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('origin' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.origin, finalOptions, this.filterCallsByOrigin, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.origin, finalOptions, this.filterCallsByOrigin, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('path' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.path, finalOptions, this.filterCallsByPath, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.path, finalOptions, this.filterCallsByPath, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('hash' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.hash, finalOptions, this.filterCallsByHash, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.hash, finalOptions, this.filterCallsByHash, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('fullUrl' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.fullUrl, finalOptions, this.filterCallsByFullUrl, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.fullUrl, finalOptions, this.filterCallsByFullUrl, maybeDuplicatedLogsFiltered, this.logs)
       }
       if ('method' in criteria) {
-        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.method, finalOptions, this.filterCallsByMethod, maybeDuplicatedLogsFiltered)
+        maybeDuplicatedLogsFiltered = handleFilterCallsWithOptions(criteria.method, finalOptions, this.filterCallsByMethod, maybeDuplicatedLogsFiltered, this.logs)
       }
 
       const uniqLogsFiltered = [...new Set(maybeDuplicatedLogsFiltered)]
@@ -70083,7 +71295,8 @@ module.exports = {
   kMockAgentAddCallHistoryLog: Symbol('mock agent add call history log'),
   kMockAgentIsCallHistoryEnabled: Symbol('mock agent is call history enabled'),
   kMockAgentAcceptsNonStandardSearchParameters: Symbol('mock agent accepts non standard search parameters'),
-  kMockCallHistoryAddLog: Symbol('mock call history add log')
+  kMockCallHistoryAddLog: Symbol('mock call history add log'),
+  kTotalDispatchCount: Symbol('total dispatch count')
 }
 
 
@@ -70101,7 +71314,8 @@ const {
   kMockAgent,
   kOriginalDispatch,
   kOrigin,
-  kGetNetConnect
+  kGetNetConnect,
+  kTotalDispatchCount
 } = __nccwpck_require2_(7595)
 const { serializePathWithQuery } = __nccwpck_require2_(586)
 const { STATUS_CODES } = __nccwpck_require2_(7067)
@@ -70301,6 +71515,8 @@ function addMockDispatch (mockDispatches, key, data, opts) {
   const replyData = typeof data === 'function' ? { callback: data } : { ...data }
   const newMockDispatch = { ...baseData, ...key, pending: true, data: { error: null, ...replyData } }
   mockDispatches.push(newMockDispatch)
+  // Track total number of intercepts ever registered for better error messages
+  mockDispatches[kTotalDispatchCount] = (mockDispatches[kTotalDispatchCount] || 0) + 1
   return newMockDispatch
 }
 
@@ -70496,13 +71712,16 @@ function buildMockDispatch () {
       } catch (error) {
         if (error.code === 'UND_MOCK_ERR_MOCK_NOT_MATCHED') {
           const netConnect = agent[kGetNetConnect]()
+          const totalInterceptsCount = this[kDispatches][kTotalDispatchCount] || this[kDispatches].length
+          const pendingInterceptsCount = this[kDispatches].filter(({ consumed }) => !consumed).length
+          const interceptsMessage = `, ${pendingInterceptsCount} interceptor(s) remaining out of ${totalInterceptsCount} defined`
           if (netConnect === false) {
-            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`)
+            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)${interceptsMessage}`)
           }
           if (checkNetConnect(netConnect, origin)) {
             originalDispatch.call(this, opts, handler)
           } else {
-            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`)
+            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)${interceptsMessage}`)
           }
         } else {
           throw error
@@ -71775,7 +72994,7 @@ function makeCacheKey (opts) {
 
   let fullPath = opts.path || '/'
 
-  if (opts.query && !pathHasQueryOrFragment(opts.path)) {
+  if (opts.query && !pathHasQueryOrFragment(fullPath)) {
     fullPath = serializePathWithQuery(fullPath, opts.query)
   }
 
@@ -71985,6 +73204,10 @@ function parseCacheControlHeader (header) {
                 headers[headers.length - 1] = lastHeader
               }
 
+              for (let j = 0; j < headers.length; j++) {
+                headers[j] = headers[j].trim()
+              }
+
               if (key in output) {
                 output[key] = output[key].concat(headers)
               } else {
@@ -71993,10 +73216,12 @@ function parseCacheControlHeader (header) {
             }
           } else {
             // Something like `no-cache="some-header"`
+            const fieldName = value.trim()
+
             if (key in output) {
-              output[key] = output[key].concat(value)
+              output[key] = output[key].concat(fieldName)
             } else {
-              output[key] = [value]
+              output[key] = [fieldName]
             }
           }
 
@@ -72131,9 +73356,11 @@ function assertCacheMethods (methods, name = 'CacheMethods') {
  * @returns {string}
  */
 function makeDeduplicationKey (cacheKey, excludeHeaders) {
-  // Create a deterministic string key from the cache key
-  // Include origin, method, path, and sorted headers
-  let key = `${cacheKey.origin}:${cacheKey.method}:${cacheKey.path}`
+  // Use JSON.stringify to produce a collision-resistant key.
+  // Previous format used `:` and `=` delimiters without escaping, which
+  // allowed different header sets to produce identical keys (e.g.
+  // {a:"x:b=y"} vs {a:"x", b:"y"}). See: https://github.com/nodejs/undici/issues/5012
+  const headers = {}
 
   if (cacheKey.headers) {
     const sortedHeaders = Object.keys(cacheKey.headers).sort()
@@ -72142,12 +73369,11 @@ function makeDeduplicationKey (cacheKey, excludeHeaders) {
       if (excludeHeaders?.has(header.toLowerCase())) {
         continue
       }
-      const value = cacheKey.headers[header]
-      key += `:${header}=${Array.isArray(value) ? value.join(',') : value}`
+      headers[header] = cacheKey.headers[header]
     }
   }
 
-  return key
+  return JSON.stringify([cacheKey.origin, cacheKey.method, cacheKey.path, headers])
 }
 
 module.exports = {
@@ -74790,7 +76016,6 @@ const { collectASequenceOfCodePointsFast } = __nccwpck_require2_(926)
 const { maxNameValuePairSize, maxAttributeValueSize } = __nccwpck_require2_(9234)
 const { isCTLExcludingHtab } = __nccwpck_require2_(1631)
 const assert = __nccwpck_require2_(4589)
-const { unescape: qsUnescape } = __nccwpck_require2_(1792)
 
 /**
  * @description Parses the field-value attributes of a set-cookie header string.
@@ -74868,7 +76093,7 @@ function parseSetCookie (header) {
   // store arbitrary data in a cookie-value SHOULD encode that data, for
   // example, using Base64 [RFC4648].
   return {
-    name, value: qsUnescape(value), ...parseUnparsedAttributes(unparsedAttributes)
+    name, value, ...parseUnparsedAttributes(unparsedAttributes)
   }
 }
 
@@ -75066,32 +76291,25 @@ function parseUnparsedAttributes (unparsedAttributes, cookieAttributeList = {}) 
     // If the attribute-name case-insensitively matches the string
     // "SameSite", the user agent MUST process the cookie-av as follows:
 
-    // 1. Let enforcement be "Default".
-    let enforcement = 'Default'
-
     const attributeValueLowercase = attributeValue.toLowerCase()
-    // 2. If cookie-av's attribute-value is a case-insensitive match for
-    //    "None", set enforcement to "None".
-    if (attributeValueLowercase.includes('none')) {
-      enforcement = 'None'
-    }
 
-    // 3. If cookie-av's attribute-value is a case-insensitive match for
-    //    "Strict", set enforcement to "Strict".
-    if (attributeValueLowercase.includes('strict')) {
-      enforcement = 'Strict'
+    // 1. If cookie-av's attribute-value is a case-insensitive match for
+    //    "None", append an attribute to the cookie-attribute-list with an
+    //    attribute-name of "SameSite" and an attribute-value of "None".
+    if (attributeValueLowercase === 'none') {
+      cookieAttributeList.sameSite = 'None'
+    } else if (attributeValueLowercase === 'strict') {
+      // 2. If cookie-av's attribute-value is a case-insensitive match for
+      //    "Strict", append an attribute to the cookie-attribute-list with
+      //    an attribute-name of "SameSite" and an attribute-value of
+      //    "Strict".
+      cookieAttributeList.sameSite = 'Strict'
+    } else if (attributeValueLowercase === 'lax') {
+      // 3. If cookie-av's attribute-value is a case-insensitive match for
+      //    "Lax", append an attribute to the cookie-attribute-list with an
+      //    attribute-name of "SameSite" and an attribute-value of "Lax".
+      cookieAttributeList.sameSite = 'Lax'
     }
-
-    // 4. If cookie-av's attribute-value is a case-insensitive match for
-    //    "Lax", set enforcement to "Lax".
-    if (attributeValueLowercase.includes('lax')) {
-      enforcement = 'Lax'
-    }
-
-    // 5. Append an attribute to the cookie-attribute-list with an
-    //    attribute-name of "SameSite" and an attribute-value of
-    //    enforcement.
-    cookieAttributeList.sameSite = enforcement
   } else {
     cookieAttributeList.unparsed ??= []
 
@@ -77625,10 +78843,10 @@ const { makeEntry } = __nccwpck_require2_(1112)
 const { webidl } = __nccwpck_require2_(8161)
 const assert = __nccwpck_require2_(4589)
 const { isomorphicDecode } = __nccwpck_require2_(926)
-const { utf8DecodeBytes } = __nccwpck_require2_(6478)
 
 const dd = Buffer.from('--')
 const decoder = new TextDecoder()
+const decoderIgnoreBOM = new TextDecoder('utf-8', { ignoreBOM: true })
 
 /**
  * @param {string} chars
@@ -77807,7 +79025,7 @@ function multipartFormDataParser (input, mimeType) {
       // 5.11. Otherwise:
 
       // 5.11.1. Let value be the UTF-8 decoding without BOM of body.
-      value = utf8DecodeBytes(Buffer.from(body))
+      value = decoderIgnoreBOM.decode(Buffer.from(body))
     }
 
     // 5.12. Assert: name is a scalar value string and value is either a scalar value string or a File object.
@@ -77823,7 +79041,7 @@ function multipartFormDataParser (input, mimeType) {
  * Parses content-disposition attributes (e.g., name="value" or filename*=utf-8''encoded)
  * @param {Buffer} input
  * @param {{ position: number }} position
- * @returns {{ name: string, value: string }}
+ * @returns {{ name: string, value: string, extended: boolean } | null}
  */
 function parseContentDispositionAttribute (input, position) {
   // Skip leading semicolon and whitespace
@@ -77923,7 +79141,7 @@ function parseContentDispositionAttribute (input, position) {
     value = decoder.decode(tokenValue)
   }
 
-  return { name: attrNameStr, value }
+  return { name: attrNameStr, value, extended: isExtended }
 }
 
 /**
@@ -77987,6 +79205,9 @@ function parseMultipartFormDataHeaders (input, position) {
     switch (bufferToLowerCasedHeaderName(headerName)) {
       case 'content-disposition': {
         name = filename = null
+        // Track whether filename was set from the extended (RFC 5987) form so
+        // a subsequent legacy `filename` attribute does not override it.
+        let filenameIsExtended = false
 
         // Collect the disposition type (should be "form-data")
         const dispositionType = collectASequenceOfBytes(
@@ -78002,8 +79223,8 @@ function parseMultipartFormDataHeaders (input, position) {
         // Parse attributes recursively until CRLF
         while (
           position.position < input.length &&
-          input[position.position] !== 0x0d &&
-          input[position.position + 1] !== 0x0a
+          (input[position.position] !== 0x0d ||
+          input[position.position + 1] !== 0x0a)
         ) {
           const attribute = parseContentDispositionAttribute(input, position)
 
@@ -78014,7 +79235,15 @@ function parseMultipartFormDataHeaders (input, position) {
           if (attribute.name === 'name') {
             name = attribute.value
           } else if (attribute.name === 'filename') {
-            filename = attribute.value
+            // Per RFC 5987 §4.1, when both legacy and extended forms of the
+            // same parameter are present, the extended (filename*) form takes
+            // precedence regardless of the order they appear in.
+            if (attribute.extended) {
+              filename = attribute.value
+              filenameIsExtended = true
+            } else if (!filenameIsExtended) {
+              filename = attribute.value
+            }
           }
         }
 
@@ -78067,7 +79296,7 @@ function parseMultipartFormDataHeaders (input, position) {
 
     // 2.9. If position does not point to a sequence of bytes starting with 0x0D 0x0A
     //      (CR LF), return failure. Otherwise, advance position by 2 (past the newline).
-    if (input[position.position] !== 0x0d && input[position.position + 1] !== 0x0a) {
+    if (input[position.position] !== 0x0d || input[position.position + 1] !== 0x0a) {
       throw parsingError('expected CRLF')
     } else {
       position.position += 2
@@ -80274,7 +81503,7 @@ function fetchFinale (fetchParams, response) {
       let responseStatus = 0
 
       // 7. If fetchParams’s request’s mode is not "navigate" or response’s has-cross-origin-redirects is false:
-      if (fetchParams.request.mode !== 'navigator' || !response.hasCrossOriginRedirects) {
+      if (fetchParams.request.mode !== 'navigate' || !response.hasCrossOriginRedirects) {
         // 1. Set responseStatus to response’s status.
         responseStatus = response.status
 
@@ -80677,7 +81906,10 @@ async function httpNetworkOrCacheFetch (
   //    8. If contentLengthHeaderValue is non-null, then append
   //    `Content-Length`/contentLengthHeaderValue to httpRequest’s header
   //    list.
-  if (contentLengthHeaderValue != null) {
+  if (
+    contentLengthHeaderValue != null &&
+    !httpRequest.headersList.contains('content-length', true)
+  ) {
     httpRequest.headersList.append('content-length', contentLengthHeaderValue, true)
   }
 
@@ -80888,12 +82120,25 @@ async function httpNetworkOrCacheFetch (
   // 14. If response’s status is 401, httpRequest’s response tainting is not "cors",
   //     includeCredentials is true, and request’s traversable for user prompts is
   //     a traversable navigable:
-  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && isTraversableNavigable(request.traversableForUserPrompts)) {
+  //
+  //     In Node.js there is no traversable navigable to prompt the user, but we
+  //     still need to handle URL-embedded credentials so authentication retries
+  //     for WebSocket handshakes continue to work.
+  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && (
+    request.useURLCredentials !== undefined ||
+    isTraversableNavigable(request.traversableForUserPrompts)
+  )) {
     // 2. If request’s body is non-null, then:
     if (request.body != null) {
       // 1. If request’s body’s source is null, then return a network error.
       if (request.body.source == null) {
-        return makeNetworkError('expected non-null body source')
+        // Note: In Node.js, this code path should not be reached because
+        // isTraversableNavigable() returns false for non-navigable contexts.
+        // However, we handle it gracefully by returning the response instead of
+        // a network error, as we won't actually retry the request.
+        // This aligns with the Fetch spec discussion in whatwg/fetch#1132,
+        // which allows implementations flexibility when credentials can't be obtained.
+        return response
       }
 
       // 2. Set request’s body to the body of the result of safely extracting
@@ -81431,7 +82676,15 @@ async function httpNetworkFetch (
           const headersList = new HeadersList()
 
           for (let i = 0; i < rawHeaders.length; i += 2) {
-            headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString('latin1'), true)
+            const nameStr = bufferToLowerCasedHeaderName(rawHeaders[i])
+            const value = rawHeaders[i + 1]
+            if (Array.isArray(value) && !Buffer.isBuffer(rawHeaders[i + 1])) {
+              for (const val of value) {
+                headersList.append(nameStr, val.toString('latin1'), true)
+              }
+            } else {
+              headersList.append(nameStr, value.toString('latin1'), true)
+            }
           }
           const location = headersList.get('location', true)
 
@@ -81600,7 +82853,15 @@ async function httpNetworkFetch (
           const headersList = new HeadersList()
 
           for (let i = 0; i < rawHeaders.length; i += 2) {
-            headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString('latin1'), true)
+            const nameStr = bufferToLowerCasedHeaderName(rawHeaders[i])
+            const value = rawHeaders[i + 1]
+            if (Array.isArray(value) && !Buffer.isBuffer(rawHeaders[i + 1])) {
+              for (const val of value) {
+                headersList.append(nameStr, val.toString('latin1'), true)
+              }
+            } else {
+              headersList.append(nameStr, value.toString('latin1'), true)
+            }
           }
 
           resolve({
@@ -84852,8 +86113,10 @@ function includesCredentials (url) {
  * @param {object|string} navigable
  */
 function isTraversableNavigable (navigable) {
-  // TODO
-  return true
+  // Returns true only if we have an actual traversable navigable object
+  // that can prompt the user for credentials. In Node.js, this will always
+  // be false since there's no Window object or navigable.
+  return navigable != null && navigable !== 'client' && navigable !== 'no-traversable'
 }
 
 class EnvironmentSettingsObjectBase {
@@ -85675,10 +86938,10 @@ webidl.util.ConvertToInt = function (V, bitLength, signedness, flags) {
   } else {
     // 3. Otherwise:
 
-    // 1. Let lowerBound be -2^bitLength − 1.
-    lowerBound = Math.pow(-2, bitLength) - 1
+    // 1. Let lowerBound be -2^(bitLength − 1).
+    lowerBound = -Math.pow(2, bitLength - 1)
 
-    // 2. Let upperBound be 2^bitLength − 1 − 1.
+    // 2. Let upperBound be 2^(bitLength − 1) − 1.
     upperBound = Math.pow(2, bitLength - 1) - 1
   }
 
@@ -85757,9 +87020,9 @@ webidl.util.ConvertToInt = function (V, bitLength, signedness, flags) {
   // 10. Set x to x modulo 2^bitLength.
   x = x % Math.pow(2, bitLength)
 
-  // 11. If signedness is "signed" and x ≥ 2^bitLength − 1,
+  // 11. If signedness is "signed" and x ≥ 2^(bitLength − 1),
   //    then return x − 2^bitLength.
-  if (signedness === 'signed' && x >= Math.pow(2, bitLength) - 1) {
+  if (signedness === 'signed' && x >= Math.pow(2, bitLength - 1)) {
     return x - Math.pow(2, bitLength)
   }
 
@@ -87458,40 +88721,35 @@ const tail = Buffer.from([0x00, 0x00, 0xff, 0xff])
 const kBuffer = Symbol('kBuffer')
 const kLength = Symbol('kLength')
 
-// Default maximum decompressed message size: 4 MB
-const kDefaultMaxDecompressedSize = 4 * 1024 * 1024
-
 class PerMessageDeflate {
   /** @type {import('node:zlib').InflateRaw} */
   #inflate
 
   #options = {}
 
-  /** @type {boolean} */
-  #aborted = false
-
-  /** @type {Function|null} */
-  #currentCallback = null
+  #maxPayloadSize = 0
 
   /**
    * @param {Map<string, string>} extensions
    */
-  constructor (extensions) {
+  constructor (extensions, options) {
     this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover')
     this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits')
+
+    this.#maxPayloadSize = options.maxPayloadSize
   }
 
+  /**
+   * Decompress a compressed payload.
+   * @param {Buffer} chunk Compressed data
+   * @param {boolean} fin Final fragment flag
+   * @param {Function} callback Callback function
+   */
   decompress (chunk, fin, callback) {
     // An endpoint uses the following algorithm to decompress a message.
     // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
     //     payload of the message.
     // 2.  Decompress the resulting data using DEFLATE.
-
-    if (this.#aborted) {
-      callback(new MessageSizeExceededError())
-      return
-    }
-
     if (!this.#inflate) {
       let windowBits = Z_DEFAULT_WINDOWBITS
 
@@ -87514,23 +88772,12 @@ class PerMessageDeflate {
       this.#inflate[kLength] = 0
 
       this.#inflate.on('data', (data) => {
-        if (this.#aborted) {
-          return
-        }
-
         this.#inflate[kLength] += data.length
 
-        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
-          this.#aborted = true
+        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
+          callback(new MessageSizeExceededError())
           this.#inflate.removeAllListeners()
-          this.#inflate.destroy()
           this.#inflate = null
-
-          if (this.#currentCallback) {
-            const cb = this.#currentCallback
-            this.#currentCallback = null
-            cb(new MessageSizeExceededError())
-          }
           return
         }
 
@@ -87543,14 +88790,13 @@ class PerMessageDeflate {
       })
     }
 
-    this.#currentCallback = callback
     this.#inflate.write(chunk)
     if (fin) {
       this.#inflate.write(tail)
     }
 
     this.#inflate.flush(() => {
-      if (this.#aborted || !this.#inflate) {
+      if (!this.#inflate) {
         return
       }
 
@@ -87558,7 +88804,6 @@ class PerMessageDeflate {
 
       this.#inflate[kBuffer].length = 0
       this.#inflate[kLength] = 0
-      this.#currentCallback = null
 
       callback(null, full)
     })
@@ -87615,18 +88860,27 @@ class ByteParser extends Writable {
   /** @type {import('./websocket').Handler} */
   #handler
 
+  /** @type {number} */
+  #maxFragments
+
+  /** @type {number} */
+  #maxPayloadSize
+
   /**
    * @param {import('./websocket').Handler} handler
    * @param {Map<string, string>|null} extensions
+   * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
    */
-  constructor (handler, extensions) {
+  constructor (handler, extensions, options = {}) {
     super()
 
     this.#handler = handler
     this.#extensions = extensions == null ? new Map() : extensions
+    this.#maxFragments = options.maxFragments ?? 0
+    this.#maxPayloadSize = options.maxPayloadSize ?? 0
 
     if (this.#extensions.has('permessage-deflate')) {
-      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions))
+      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options))
     }
   }
 
@@ -87640,6 +88894,19 @@ class ByteParser extends Writable {
     this.#loop = true
 
     this.run(callback)
+  }
+
+  #validatePayloadLength () {
+    if (
+      this.#maxPayloadSize > 0 &&
+      !isControlFrame(this.#info.opcode) &&
+      this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
+    ) {
+      failWebsocketConnection(this.#handler, 1009, 'Payload size exceeds maximum allowed size')
+      return false
+    }
+
+    return true
   }
 
   /**
@@ -87730,6 +88997,10 @@ class ByteParser extends Writable {
         if (payloadLength <= 125) {
           this.#info.payloadLength = payloadLength
           this.#state = parserStates.READ_DATA
+
+          if (!this.#validatePayloadLength()) {
+            return
+          }
         } else if (payloadLength === 126) {
           this.#state = parserStates.PAYLOADLENGTH_16
         } else if (payloadLength === 127) {
@@ -87754,6 +89025,10 @@ class ByteParser extends Writable {
 
         this.#info.payloadLength = buffer.readUInt16BE(0)
         this.#state = parserStates.READ_DATA
+
+        if (!this.#validatePayloadLength()) {
+          return
+        }
       } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
         if (this.#byteOffset < 8) {
           return callback()
@@ -87776,6 +89051,10 @@ class ByteParser extends Writable {
 
         this.#info.payloadLength = lower
         this.#state = parserStates.READ_DATA
+
+        if (!this.#validatePayloadLength()) {
+          return
+        }
       } else if (this.#state === parserStates.READ_DATA) {
         if (this.#byteOffset < this.#info.payloadLength) {
           return callback()
@@ -87788,7 +89067,9 @@ class ByteParser extends Writable {
           this.#state = parserStates.INFO
         } else {
           if (!this.#info.compressed) {
-            this.writeFragments(body)
+            if (!this.writeFragments(body)) {
+              return
+            }
 
             // If the frame is not fragmented, a message has been received.
             // If the frame is fragmented, it will terminate with a fin bit set
@@ -87800,29 +89081,41 @@ class ByteParser extends Writable {
 
             this.#state = parserStates.INFO
           } else {
-            this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
-              if (error) {
-                // Use 1009 (Message Too Big) for decompression size limit errors
-                const code = error instanceof MessageSizeExceededError ? 1009 : 1007
-                failWebsocketConnection(this.#handler, code, error.message)
-                return
-              }
+            this.#extensions.get('permessage-deflate').decompress(
+              body,
+              this.#info.fin,
+              (error, data) => {
+                if (error) {
+                  const code = error instanceof MessageSizeExceededError ? 1009 : 1007
+                  failWebsocketConnection(this.#handler, code, error.message)
+                  return
+                }
 
-              this.writeFragments(data)
+                if (!this.writeFragments(data)) {
+                  return
+                }
 
-              if (!this.#info.fin) {
-                this.#state = parserStates.INFO
+                // Check cumulative fragment size
+                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+                  failWebsocketConnection(this.#handler, 1009, new MessageSizeExceededError().message)
+                  return
+                }
+
+                if (!this.#info.fin) {
+                  this.#state = parserStates.INFO
+                  this.#loop = true
+                  this.run(callback)
+                  return
+                }
+
+                websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments())
+
                 this.#loop = true
+                this.#state = parserStates.INFO
                 this.run(callback)
-                return
-              }
-
-              websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments())
-
-              this.#loop = true
-              this.#state = parserStates.INFO
-              this.run(callback)
-            })
+              },
+              this.#fragmentsBytes
+            )
 
             this.#loop = false
             break
@@ -87881,8 +89174,17 @@ class ByteParser extends Writable {
   }
 
   writeFragments (fragment) {
+    if (
+      this.#maxFragments > 0 &&
+      this.#fragments.length === this.#maxFragments
+    ) {
+      failWebsocketConnection(this.#handler, 1008, 'Too many message fragments')
+      return false
+    }
+
     this.#fragmentsBytes += fragment.length
     this.#fragments.push(fragment)
+    return true
   }
 
   consumeFragments () {
@@ -88521,7 +89823,14 @@ class WebSocketStream {
   #onConnectionEstablished (response, parsedExtensions) {
     this.#handler.socket = response.socket
 
-    const parser = new ByteParser(this.#handler, parsedExtensions)
+    // Get options from dispatcher options
+    const maxFragments = this.#handler.controller.dispatcher?.webSocketOptions?.maxFragments
+    const maxPayloadSize = this.#handler.controller.dispatcher?.webSocketOptions?.maxPayloadSize
+
+    const parser = new ByteParser(this.#handler, parsedExtensions, {
+      maxFragments,
+      maxPayloadSize
+    })
     parser.on('drain', () => this.#handler.onParserDrain())
     parser.on('error', (err) => this.#handler.onParserError(err))
 
@@ -88546,12 +89855,6 @@ class WebSocketStream {
     const readable = new ReadableStream({
       start: (controller) => {
         this.#readableStreamController = controller
-      },
-      pull (controller) {
-        let chunk
-        while (controller.desiredSize > 0 && (chunk = response.socket.read()) !== null) {
-          controller.enqueue(chunk)
-        }
       },
       cancel: (reason) => this.#cancel(reason)
     })
@@ -88601,7 +89904,7 @@ class WebSocketStream {
       try {
         chunk = utf8Decode(data)
       } catch {
-        failWebsocketConnection(this.#handler, 'Received invalid UTF-8 in text frame.')
+        failWebsocketConnection(this.#handler, 1007, 'Received invalid UTF-8 in text frame.')
         return
       }
     } else if (type === opcodes.BINARY) {
@@ -89148,6 +90451,18 @@ const { SendQueue } = __nccwpck_require2_(5094)
 const { WebsocketFrameSend } = __nccwpck_require2_(6674)
 const { channels } = __nccwpck_require2_(8580)
 
+function getSocketAddress (socket) {
+  if (typeof socket?.address === 'function') {
+    return socket.address()
+  }
+
+  if (typeof socket?.session?.socket?.address === 'function') {
+    return socket.session.socket.address()
+  }
+
+  return null
+}
+
 /**
  * @typedef {object} Handler
  * @property {(response: any, extensions?: string[]) => void} onConnectionEstablished
@@ -89579,7 +90894,14 @@ class WebSocket extends EventTarget {
     // once this happens, the connection is open
     this.#handler.socket = response.socket
 
-    const parser = new ByteParser(this.#handler, parsedExtensions)
+    const webSocketOptions = this.#handler.controller.dispatcher?.webSocketOptions
+    const maxFragments = webSocketOptions?.maxFragments
+    const maxPayloadSize = webSocketOptions?.maxPayloadSize
+
+    const parser = new ByteParser(this.#handler, parsedExtensions, {
+      maxFragments,
+      maxPayloadSize
+    })
     parser.on('drain', () => this.#handler.onParserDrain())
     parser.on('error', (err) => this.#handler.onParserError(err))
 
@@ -89614,7 +90936,7 @@ class WebSocket extends EventTarget {
       // Convert headers to a plain object for the event
       const headers = response.headersList.entries
       channels.open.publish({
-        address: response.socket.address(),
+        address: getSocketAddress(response.socket),
         protocol: this.#protocol,
         extensions: this.#extensions,
         websocket: this,
@@ -90663,12 +91985,13 @@ module.exports = __nccwpck_require__(3106);
 /***/ ((module, __unused_webpack_exports, __nccwpck_require2_) => {
 
 "use strict";
-/*! Axios v1.16.0 Copyright (c) 2026 Matt Zabriskie and contributors */
+/*! Axios v1.18.0 Copyright (c) 2026 Matt Zabriskie and contributors */
 
 
 var FormData$1 = __nccwpck_require2_(8104);
 var crypto = __nccwpck_require2_(6982);
 var url = __nccwpck_require2_(7016);
+var HttpsProxyAgent = __nccwpck_require2_(2649);
 var http = __nccwpck_require2_(8611);
 var https = __nccwpck_require2_(5692);
 var http2 = __nccwpck_require2_(5675);
@@ -90704,6 +92027,52 @@ const {
   iterator,
   toStringTag
 } = Symbol;
+
+/* Creating a function that will check if an object has a property. */
+const hasOwnProperty = (({
+  hasOwnProperty
+}) => (obj, prop) => hasOwnProperty.call(obj, prop))(Object.prototype);
+
+/**
+ * Walk the prototype chain (excluding the shared Object.prototype) looking for
+ * an own `prop`. This distinguishes genuine own/inherited members — including
+ * class accessors and template prototypes — from members injected via
+ * Object.prototype pollution (e.g. `Object.prototype.username = '...'`), which
+ * live on Object.prototype itself and are therefore never matched.
+ *
+ * @param {*} thing The value whose chain to inspect
+ * @param {string|symbol} prop The property key to look for
+ *
+ * @returns {boolean} True when `prop` is owned below Object.prototype
+ */
+const hasOwnInPrototypeChain = (thing, prop) => {
+  let obj = thing;
+  const seen = [];
+  while (obj != null && obj !== Object.prototype) {
+    if (seen.indexOf(obj) !== -1) {
+      return false;
+    }
+    seen.push(obj);
+    if (hasOwnProperty(obj, prop)) {
+      return true;
+    }
+    obj = getPrototypeOf(obj);
+  }
+  return false;
+};
+
+/**
+ * Read `obj[prop]` only when it is safe from Object.prototype pollution. Own
+ * properties and members inherited from a non-Object.prototype source (a class
+ * instance or template object) are honored; a value reachable only through a
+ * polluted Object.prototype is ignored and `undefined` is returned.
+ *
+ * @param {*} obj The source object
+ * @param {string|symbol} prop The property key to read
+ *
+ * @returns {*} The resolved value, or undefined when unsafe/absent
+ */
+const getSafeProp = (obj, prop) => obj != null && hasOwnInPrototypeChain(obj, prop) ? obj[prop] : undefined;
 const kindOf = (cache => thing => {
   const str = toString.call(thing);
   return cache[str] || (cache[str] = str.slice(8, -1).toLowerCase());
@@ -90822,11 +92191,15 @@ const isBoolean = thing => thing === true || thing === false;
  * @returns {boolean} True if value is a plain Object, otherwise false
  */
 const isPlainObject = val => {
-  if (kindOf(val) !== 'object') {
+  if (!isObject(val)) {
     return false;
   }
   const prototype = getPrototypeOf(val);
-  return (prototype === null || prototype === Object.prototype || Object.getPrototypeOf(prototype) === null) && !(toStringTag in val) && !(iterator in val);
+  return (prototype === null || prototype === Object.prototype || getPrototypeOf(prototype) === null) &&
+  // Treat any genuine (non-Object.prototype-polluted) Symbol.toStringTag or
+  // Symbol.iterator as evidence the value is a tagged/iterable type rather
+  // than a plain object, while ignoring keys injected onto Object.prototype.
+  !hasOwnInPrototypeChain(val, toStringTag) && !hasOwnInPrototypeChain(val, iterator);
 };
 
 /**
@@ -91081,7 +92454,10 @@ function merge(...objs) {
     if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
       return;
     }
-    const targetKey = caseless && findKey(result, key) || key;
+
+    // findKey lowercases the key, so caseless lookup only applies to strings —
+    // symbol keys are identity-matched.
+    const targetKey = caseless && typeof key === 'string' && findKey(result, key) || key;
     // Read via own-prop only — a bare `result[targetKey]` walks the prototype
     // chain, so a polluted Object.prototype value could surface here and get
     // copied into the merged result.
@@ -91097,7 +92473,21 @@ function merge(...objs) {
     }
   };
   for (let i = 0, l = objs.length; i < l; i++) {
-    objs[i] && forEach(objs[i], assignValue);
+    const source = objs[i];
+    if (!source || isBuffer(source)) {
+      continue;
+    }
+    forEach(source, assignValue);
+    if (typeof source !== 'object' || isArray(source)) {
+      continue;
+    }
+    const symbols = Object.getOwnPropertySymbols(source);
+    for (let j = 0; j < symbols.length; j++) {
+      const symbol = symbols[j];
+      if (propertyIsEnumerable.call(source, symbol)) {
+        assignValue(source[symbol], symbol);
+      }
+    }
   }
   return result;
 }
@@ -91309,11 +92699,9 @@ const toCamelCase = str => {
     return p1.toUpperCase() + p2;
   });
 };
-
-/* Creating a function that will check if an object has a property. */
-const hasOwnProperty = (({
-  hasOwnProperty
-}) => (obj, prop) => hasOwnProperty.call(obj, prop))(Object.prototype);
+const {
+  propertyIsEnumerable
+} = Object.prototype;
 
 /**
  * Determine if a value is a RegExp object
@@ -91402,10 +92790,10 @@ function isSpecCompliantForm(thing) {
  * @returns {Object} The JSON-compatible object.
  */
 const toJSONObject = obj => {
-  const stack = new Array(10);
-  const visit = (source, i) => {
+  const visited = new WeakSet();
+  const visit = source => {
     if (isObject(source)) {
-      if (stack.indexOf(source) >= 0) {
+      if (visited.has(source)) {
         return;
       }
 
@@ -91414,19 +92802,20 @@ const toJSONObject = obj => {
         return source;
       }
       if (!('toJSON' in source)) {
-        stack[i] = source;
+        // add-on descent / delete-on-ascent: preserves path semantics, so DAG nodes serialise at every occurrence (see #7230).
+        visited.add(source);
         const target = isArray(source) ? [] : {};
         forEach(source, (value, key) => {
-          const reducedValue = visit(value, i + 1);
+          const reducedValue = visit(value);
           !isUndefined(reducedValue) && (target[key] = reducedValue);
         });
-        stack[i] = undefined;
+        visited.delete(source);
         return target;
       }
     }
     return source;
   };
-  return visit(obj, 0);
+  return visit(obj);
 };
 
 /**
@@ -91487,6 +92876,19 @@ const asap = typeof queueMicrotask !== 'undefined' ? queueMicrotask.bind(_global
 // *********************
 
 const isIterable = thing => thing != null && isFunction$1(thing[iterator]);
+
+/**
+ * Determine if a value is iterable via an iterator that is NOT sourced solely
+ * from a polluted Object.prototype. Use this instead of `isIterable` whenever
+ * the iterable comes from untrusted input (e.g. user-supplied header sources),
+ * so `Object.prototype[Symbol.iterator] = ...` cannot turn an ordinary object
+ * into an attacker-controlled entries iterator.
+ *
+ * @param {*} thing The value to test
+ *
+ * @returns {boolean} True if value has a non-polluted iterator
+ */
+const isSafeIterable = thing => thing != null && hasOwnInPrototypeChain(thing, iterator) && isIterable(thing);
 var utils$1 = {
   isArray,
   isArrayBuffer,
@@ -91532,6 +92934,8 @@ var utils$1 = {
   hasOwnProperty,
   hasOwnProp: hasOwnProperty,
   // an alias to avoid ESLint no-prototype-builtins detection
+  hasOwnInPrototypeChain,
+  getSafeProp,
   reduceDescriptors,
   freezeMethods,
   toObjectSet,
@@ -91547,7 +92951,8 @@ var utils$1 = {
   isThenable,
   setImmediate: _setImmediate,
   asap,
-  isIterable
+  isIterable,
+  isSafeIterable
 };
 
 // RawAxiosHeaders whose duplicates are ignored by node
@@ -91593,8 +92998,6 @@ var parseHeaders = rawHeaders => {
   return parsed;
 };
 
-const $internals = Symbol('internals');
-const INVALID_HEADER_VALUE_CHARS_RE = /[^\x09\x20-\x7E\x80-\xFF]/g;
 function trimSPorHTAB(str) {
   let start = 0;
   let end = str.length;
@@ -91614,11 +93017,31 @@ function trimSPorHTAB(str) {
   }
   return start === 0 && end === str.length ? str : str.slice(start, end);
 }
+
+// The control-code ranges are intentional: header sanitization strips C0/DEL bytes.
+// eslint-disable-next-line no-control-regex
+const INVALID_UNICODE_HEADER_VALUE_CHARS = new RegExp('[\\u0000-\\u0008\\u000a-\\u001f\\u007f]+', 'g');
+// eslint-disable-next-line no-control-regex
+const INVALID_BYTE_STRING_HEADER_VALUE_CHARS = new RegExp('[^\\u0009\\u0020-\\u007e\\u0080-\\u00ff]+', 'g');
+function sanitizeValue(value, invalidChars) {
+  if (utils$1.isArray(value)) {
+    return value.map(item => sanitizeValue(item, invalidChars));
+  }
+  return trimSPorHTAB(String(value).replace(invalidChars, ''));
+}
+const sanitizeHeaderValue = value => sanitizeValue(value, INVALID_UNICODE_HEADER_VALUE_CHARS);
+const sanitizeByteStringHeaderValue = value => sanitizeValue(value, INVALID_BYTE_STRING_HEADER_VALUE_CHARS);
+function toByteStringHeaderObject(headers) {
+  const byteStringHeaders = Object.create(null);
+  utils$1.forEach(headers.toJSON(), (value, header) => {
+    byteStringHeaders[header] = sanitizeByteStringHeaderValue(value);
+  });
+  return byteStringHeaders;
+}
+
+const $internals = Symbol('internals');
 function normalizeHeader(header) {
   return header && String(header).trim().toLowerCase();
-}
-function sanitizeHeaderValue(str) {
-  return trimSPorHTAB(str.replace(INVALID_HEADER_VALUE_CHARS_RE, ''));
 }
 function normalizeValue(value) {
   if (value === false || value == null) {
@@ -91679,7 +93102,7 @@ class AxiosHeaders {
     function setHeader(_value, _header, _rewrite) {
       const lHeader = normalizeHeader(_header);
       if (!lHeader) {
-        throw new Error('header name must be a non-empty string');
+        return;
       }
       const key = utils$1.findKey(self, lHeader);
       if (!key || self[key] === undefined || _rewrite === true || _rewrite === undefined && self[key] !== false) {
@@ -91691,15 +93114,21 @@ class AxiosHeaders {
       setHeaders(header, valueOrRewrite);
     } else if (utils$1.isString(header) && (header = header.trim()) && !isValidHeaderName(header)) {
       setHeaders(parseHeaders(header), valueOrRewrite);
-    } else if (utils$1.isObject(header) && utils$1.isIterable(header)) {
-      let obj = {},
+    } else if (utils$1.isObject(header) && utils$1.isSafeIterable(header)) {
+      let obj = Object.create(null),
         dest,
         key;
       for (const entry of header) {
         if (!utils$1.isArray(entry)) {
-          throw TypeError('Object iterator must return a key-value pair');
+          throw new TypeError('Object iterator must return a key-value pair');
         }
-        obj[key = entry[0]] = (dest = obj[key]) ? utils$1.isArray(dest) ? [...dest, entry[1]] : [dest, entry[1]] : entry[1];
+        key = entry[0];
+        if (utils$1.hasOwnProp(obj, key)) {
+          dest = obj[key];
+          obj[key] = utils$1.isArray(dest) ? [...dest, entry[1]] : [dest, entry[1]];
+        } else {
+          obj[key] = entry[1];
+        }
       }
       setHeaders(obj, valueOrRewrite);
     } else {
@@ -92002,6 +93431,10 @@ AxiosError.ERR_NOT_SUPPORT = 'ERR_NOT_SUPPORT';
 AxiosError.ERR_INVALID_URL = 'ERR_INVALID_URL';
 AxiosError.ERR_FORM_DATA_DEPTH_EXCEEDED = 'ERR_FORM_DATA_DEPTH_EXCEEDED';
 
+// Default nesting limit shared with the inverse transform (formDataToJSON) so
+// the FormData <-> JSON round-trip stays symmetric.
+const DEFAULT_FORM_DATA_MAX_DEPTH = 100;
+
 /**
  * Determines if the given thing is a array or js object.
  *
@@ -92102,8 +93535,9 @@ function toFormData(obj, formData, options) {
   const dots = options.dots;
   const indexes = options.indexes;
   const _Blob = options.Blob || typeof Blob !== 'undefined' && Blob;
-  const maxDepth = options.maxDepth === undefined ? 100 : options.maxDepth;
+  const maxDepth = options.maxDepth === undefined ? DEFAULT_FORM_DATA_MAX_DEPTH : options.maxDepth;
   const useBlob = _Blob && utils$1.isSpecCompliantForm(formData);
+  const stack = [];
   if (!utils$1.isFunction(visitor)) {
     throw new TypeError('visitor must be a function');
   }
@@ -92122,6 +93556,28 @@ function toFormData(obj, formData, options) {
       return useBlob && typeof Blob === 'function' ? new Blob([value]) : Buffer.from(value);
     }
     return value;
+  }
+  function throwIfMaxDepthExceeded(depth) {
+    if (depth > maxDepth) {
+      throw new AxiosError('Object is too deeply nested (' + depth + ' levels). Max depth: ' + maxDepth, AxiosError.ERR_FORM_DATA_DEPTH_EXCEEDED);
+    }
+  }
+  function stringifyWithDepthLimit(value, depth) {
+    if (maxDepth === Infinity) {
+      return JSON.stringify(value);
+    }
+    const ancestors = [];
+    return JSON.stringify(value, function limitDepth(_key, currentValue) {
+      if (!utils$1.isObject(currentValue)) {
+        return currentValue;
+      }
+      while (ancestors.length && ancestors[ancestors.length - 1] !== this) {
+        ancestors.pop();
+      }
+      ancestors.push(currentValue);
+      throwIfMaxDepthExceeded(depth + ancestors.length - 1);
+      return currentValue;
+    });
   }
 
   /**
@@ -92145,7 +93601,7 @@ function toFormData(obj, formData, options) {
         // eslint-disable-next-line no-param-reassign
         key = metaTokens ? key : key.slice(0, -2);
         // eslint-disable-next-line no-param-reassign
-        value = JSON.stringify(value);
+        value = stringifyWithDepthLimit(value, 1);
       } else if (utils$1.isArray(value) && isFlatArray(value) || (utils$1.isFileList(value) || utils$1.endsWith(key, '[]')) && (arr = utils$1.toArray(value))) {
         // eslint-disable-next-line no-param-reassign
         key = removeBrackets(key);
@@ -92163,7 +93619,6 @@ function toFormData(obj, formData, options) {
     formData.append(renderKey(path, key, dots), convertValue(value));
     return false;
   }
-  const stack = [];
   const exposedHelpers = Object.assign(predicates, {
     defaultVisitor,
     convertValue,
@@ -92171,11 +93626,9 @@ function toFormData(obj, formData, options) {
   });
   function build(value, path, depth = 0) {
     if (utils$1.isUndefined(value)) return;
-    if (depth > maxDepth) {
-      throw new AxiosError('Object is too deeply nested (' + depth + ' levels). Max depth: ' + maxDepth, AxiosError.ERR_FORM_DATA_DEPTH_EXCEEDED);
-    }
+    throwIfMaxDepthExceeded(depth);
     if (stack.indexOf(value) !== -1) {
-      throw Error('Circular reference detected in ' + path.join('.'));
+      throw new Error('Circular reference detected in ' + path.join('.'));
     }
     stack.push(value);
     utils$1.forEach(value, function each(el, key) {
@@ -92265,11 +93718,15 @@ function buildURL(url, params, options) {
   if (!params) {
     return url;
   }
-  const _encode = options && options.encode || encode;
   const _options = utils$1.isFunction(options) ? {
     serialize: options
   } : options;
-  const serializeFn = _options && _options.serialize;
+
+  // Read serializer options pollution-safely: own properties and methods on a
+  // class/template prototype are honored, but values injected onto a polluted
+  // Object.prototype are ignored.
+  const _encode = utils$1.getSafeProp(_options, 'encode') || encode;
+  const serializeFn = utils$1.getSafeProp(_options, 'serialize');
   let serializedParams;
   if (serializeFn) {
     serializedParams = serializeFn(params, _options);
@@ -92357,7 +93814,9 @@ var transitionalDefaults = {
   silentJSONParsing: true,
   forcedJSONParsing: true,
   clarifyTimeoutError: false,
-  legacyInterceptorReqResOrdering: true
+  legacyInterceptorReqResOrdering: true,
+  advertiseZstdAcceptEncoding: false,
+  validateStatusUndefinedResolves: true
 };
 
 var URLSearchParams = url.URLSearchParams;
@@ -92458,6 +93917,13 @@ function toURLEncodedForm(data, options) {
   });
 }
 
+const MAX_DEPTH = DEFAULT_FORM_DATA_MAX_DEPTH;
+function throwIfDepthExceeded(index) {
+  if (index > MAX_DEPTH) {
+    throw new AxiosError('FormData field is too deeply nested (' + index + ' levels). Max depth: ' + MAX_DEPTH, AxiosError.ERR_FORM_DATA_DEPTH_EXCEEDED);
+  }
+}
+
 /**
  * It takes a string like `foo[x][y][z]` and returns an array like `['foo', 'x', 'y', 'z']
  *
@@ -92470,9 +93936,14 @@ function parsePropPath(name) {
   // foo.x.y.z
   // foo-x-y-z
   // foo x y z
-  return utils$1.matchAll(/\w+|\[(\w*)]/g, name).map(match => {
-    return match[0] === '[]' ? '' : match[1] || match[0];
-  });
+  const path = [];
+  const pattern = /\w+|\[(\w*)]/g;
+  let match;
+  while ((match = pattern.exec(name)) !== null) {
+    throwIfDepthExceeded(path.length);
+    path.push(match[0] === '[]' ? '' : match[1] || match[0]);
+  }
+  return path;
 }
 
 /**
@@ -92504,6 +93975,7 @@ function arrayToObject(arr) {
  */
 function formDataToJSON(formData) {
   function buildPath(path, value, target, index) {
+    throwIfDepthExceeded(index);
     let name = path[index++];
     if (name === '__proto__') return true;
     const isNumericKey = Number.isFinite(+name);
@@ -92517,7 +93989,7 @@ function formDataToJSON(formData) {
       }
       return !isNumericKey;
     }
-    if (!target[name] || !utils$1.isObject(target[name])) {
+    if (!utils$1.hasOwnProp(target, name) || !utils$1.isObject(target[name])) {
       target[name] = [];
     }
     const result = buildPath(path, value, target[name], index);
@@ -92744,6 +94216,24 @@ function combineURLs(baseURL, relativeURL) {
   return relativeURL ? baseURL.replace(/\/?\/$/, '') + '/' + relativeURL.replace(/^\/+/, '') : baseURL;
 }
 
+const malformedHttpProtocol = /^https?:(?!\/\/)/i;
+const httpProtocolControlCharacters = /[\t\n\r]/g;
+function stripLeadingC0ControlOrSpace(url) {
+  let i = 0;
+  while (i < url.length && url.charCodeAt(i) <= 0x20) {
+    i++;
+  }
+  return url.slice(i);
+}
+function normalizeURLForProtocolCheck(url) {
+  return stripLeadingC0ControlOrSpace(url).replace(httpProtocolControlCharacters, '');
+}
+function assertValidHttpProtocolURL(url, config) {
+  if (typeof url === 'string' && malformedHttpProtocol.test(normalizeURLForProtocolCheck(url))) {
+    throw new AxiosError('Invalid URL: missing "//" after protocol', AxiosError.ERR_INVALID_URL, config);
+  }
+}
+
 /**
  * Creates a new URL by combining the baseURL with the requestedURL,
  * only when the requestedURL is not already an absolute URL.
@@ -92754,9 +94244,11 @@ function combineURLs(baseURL, relativeURL) {
  *
  * @returns {string} The combined full path
  */
-function buildFullPath(baseURL, requestedURL, allowAbsoluteUrls) {
+function buildFullPath(baseURL, requestedURL, allowAbsoluteUrls, config) {
+  assertValidHttpProtocolURL(requestedURL, config);
   let isRelativeUrl = !isAbsoluteURL(requestedURL);
   if (baseURL && (isRelativeUrl || allowAbsoluteUrls === false)) {
+    assertValidHttpProtocolURL(baseURL, config);
     return combineURLs(baseURL, requestedURL);
   }
   return requestedURL;
@@ -92858,14 +94350,16 @@ function getEnv(key) {
   return process.env[key.toLowerCase()] || process.env[key.toUpperCase()] || '';
 }
 
-const VERSION = "1.16.0";
+const VERSION = "1.18.0";
 
 function parseProtocol(url) {
   const match = /^([-+\w]{1,25}):(?:\/\/)?/.exec(url);
   return match && match[1] || '';
 }
 
-const DATA_URL_PATTERN = /^(?:([^;]+);)?(?:[^;]+;)?(base64|),([\s\S]*)$/;
+// RFC 2397: data:[<mediatype>][;base64],<data>
+// mediatype = type/subtype followed by optional ;name=value parameters
+const DATA_URL_PATTERN = /^([^,;]+\/[^,;]+)?((?:;[^,;=]+=[^,;]+)*)(;base64)?,([\s\S]*)$/;
 
 /**
  * Parse data uri to a Buffer or Blob
@@ -92889,10 +94383,20 @@ function fromDataURI(uri, asBlob, options) {
     if (!match) {
       throw new AxiosError('Invalid URL', AxiosError.ERR_INVALID_URL);
     }
-    const mime = match[1];
-    const isBase64 = match[2];
-    const body = match[3];
-    const buffer = Buffer.from(decodeURIComponent(body), isBase64 ? 'base64' : 'utf8');
+    const type = match[1];
+    const params = match[2];
+    const encoding = match[3] ? 'base64' : 'utf8';
+    const body = match[4];
+
+    // RFC 2397 section 3: default mediatype is text/plain;charset=US-ASCII
+    // Bare `data:,` leaves mime undefined; Blob normalises that to "" per spec.
+    let mime;
+    if (type) {
+      mime = params ? type + params : type;
+    } else if (params) {
+      mime = 'text/plain' + params;
+    }
+    const buffer = Buffer.from(decodeURIComponent(body), encoding);
     if (asBlob) {
       if (!_Blob) {
         throw new AxiosError('Blob is not supported', AxiosError.ERR_NOT_SUPPORT);
@@ -93085,10 +94589,10 @@ const formDataToStream = (form, headersHandler, options) => {
     boundary = tag + '-' + platform.generateString(size, BOUNDARY_ALPHABET)
   } = options || {};
   if (!utils$1.isFormData(form)) {
-    throw TypeError('FormData instance required');
+    throw new TypeError('FormData instance required');
   }
   if (boundary.length < 1 || boundary.length > 70) {
-    throw Error('boundary must be 1-70 characters long');
+    throw new Error('boundary must be 1-70 characters long');
   }
   const boundaryBytes = textEncoder.encode('--' + boundary + CRLF);
   const footerBytes = textEncoder.encode('--' + boundary + '--' + CRLF);
@@ -93138,6 +94642,84 @@ class ZlibHeaderTransformStream extends stream.Transform {
   }
 }
 
+class Http2Sessions {
+  constructor() {
+    this.sessions = Object.create(null);
+  }
+  getSession(authority, options) {
+    options = Object.assign({
+      sessionTimeout: 1000
+    }, options);
+    let authoritySessions = this.sessions[authority];
+    if (authoritySessions) {
+      let len = authoritySessions.length;
+      for (let i = 0; i < len; i++) {
+        const [sessionHandle, sessionOptions] = authoritySessions[i];
+        if (!sessionHandle.destroyed && !sessionHandle.closed && util.isDeepStrictEqual(sessionOptions, options)) {
+          return sessionHandle;
+        }
+      }
+    }
+    const session = http2.connect(authority, options);
+    let removed;
+    let timer;
+    const removeSession = () => {
+      if (removed) {
+        return;
+      }
+      removed = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      let entries = authoritySessions,
+        len = entries.length,
+        i = len;
+      while (i--) {
+        if (entries[i][0] === session) {
+          if (len === 1) {
+            delete this.sessions[authority];
+          } else {
+            entries.splice(i, 1);
+          }
+          if (!session.closed) {
+            session.close();
+          }
+          return;
+        }
+      }
+    };
+    const originalRequestFn = session.request;
+    const {
+      sessionTimeout
+    } = options;
+    if (sessionTimeout != null) {
+      let streamsCount = 0;
+      session.request = function () {
+        const stream = originalRequestFn.apply(this, arguments);
+        streamsCount++;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        stream.once('close', () => {
+          if (! --streamsCount) {
+            timer = setTimeout(() => {
+              timer = null;
+              removeSession();
+            }, sessionTimeout);
+          }
+        });
+        return stream;
+      };
+    }
+    session.once('close', removeSession);
+    let entry = [session, options];
+    authoritySessions ? authoritySessions.push(entry) : authoritySessions = this.sessions[authority] = [entry];
+    return session;
+  }
+}
+
 const callbackify = (fn, reducer) => {
   return utils$1.isAsyncFn(fn) ? function (...args) {
     const cb = args.pop();
@@ -93151,12 +94733,33 @@ const callbackify = (fn, reducer) => {
   } : fn;
 };
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost']);
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '0.0.0.0']);
 const isIPv4Loopback = host => {
   const parts = host.split('.');
   if (parts.length !== 4) return false;
   if (parts[0] !== '127') return false;
   return parts.every(p => /^\d+$/.test(p) && Number(p) >= 0 && Number(p) <= 255);
+};
+const isIPv6ZeroGroup = group => /^0{1,4}$/.test(group);
+
+// The unspecified address (IPv4 0.0.0.0 / IPv6 ::) resolves to the local host
+// for outbound connections, so treat it as loopback-equivalent for NO_PROXY
+// matching. 0.0.0.0 is covered by LOOPBACK_HOSTNAMES; this handles compressed
+// and full IPv6 all-zero forms so both families bypass symmetrically.
+const isIPv6Unspecified = host => {
+  if (host === '::') return true;
+  const compressionIndex = host.indexOf('::');
+  if (compressionIndex !== -1) {
+    if (compressionIndex !== host.lastIndexOf('::')) return false;
+    const left = host.slice(0, compressionIndex);
+    const right = host.slice(compressionIndex + 2);
+    const leftGroups = left ? left.split(':') : [];
+    const rightGroups = right ? right.split(':') : [];
+    const explicitGroups = leftGroups.length + rightGroups.length;
+    return explicitGroups < 8 && leftGroups.every(isIPv6ZeroGroup) && rightGroups.every(isIPv6ZeroGroup);
+  }
+  const groups = host.split(':');
+  return groups.length === 8 && groups.every(isIPv6ZeroGroup);
 };
 const isIPv6Loopback = host => {
   // Collapse all-zero groups: any form of ::1 / 0:0:...:0:1
@@ -93190,6 +94793,7 @@ const isLoopback = host => {
   if (!host) return false;
   if (LOOPBACK_HOSTNAMES.has(host)) return true;
   if (isIPv4Loopback(host)) return true;
+  if (isIPv6Unspecified(host)) return true;
   return isIPv6Loopback(host);
 };
 const DEFAULT_PORTS = {
@@ -93372,6 +94976,9 @@ const progressEventReducer = (listener, isDownloadStream, freq = 3) => {
   let bytesNotified = 0;
   const _speedometer = speedometer(50, 250);
   return throttle(e => {
+    if (!e || typeof e.loaded !== 'number') {
+      return;
+    }
     const rawLoaded = e.loaded;
     const total = e.lengthComputable ? e.total : undefined;
     const loaded = total != null ? Math.min(rawLoaded, total) : rawLoaded;
@@ -93406,11 +95013,13 @@ const asyncDecorator = fn => (...args) => utils$1.asap(() => fn(...args));
  * Estimate decoded byte length of a data:// URL *without* allocating large buffers.
  * - For base64: compute exact decoded size using length and padding;
  *               handle %XX at the character-count level (no string allocation).
- * - For non-base64: use UTF-8 byteLength of the encoded body as a safe upper bound.
+ * - For non-base64: compute the exact percent-decoded UTF-8 byte length.
  *
  * @param {string} url
  * @returns {number}
  */
+const isHexDigit = charCode => charCode >= 48 && charCode <= 57 || charCode >= 65 && charCode <= 70 || charCode >= 97 && charCode <= 102;
+const isPercentEncodedByte = (str, i, len) => i + 2 < len && isHexDigit(str.charCodeAt(i + 1)) && isHexDigit(str.charCodeAt(i + 2));
 function estimateDataURLDecodedBytes(url) {
   if (!url || typeof url !== 'string') return 0;
   if (!url.startsWith('data:')) return 0;
@@ -93427,7 +95036,7 @@ function estimateDataURLDecodedBytes(url) {
       if (body.charCodeAt(i) === 37 /* '%' */ && i + 2 < len) {
         const a = body.charCodeAt(i + 1);
         const b = body.charCodeAt(i + 2);
-        const isHex = (a >= 48 && a <= 57 || a >= 65 && a <= 70 || a >= 97 && a <= 102) && (b >= 48 && b <= 57 || b >= 65 && b <= 70 || b >= 97 && b <= 102);
+        const isHex = isHexDigit(a) && isHexDigit(b);
         if (isHex) {
           effectiveLen -= 2;
           i += 2;
@@ -93462,18 +95071,18 @@ function estimateDataURLDecodedBytes(url) {
     const bytes = groups * 3 - (pad || 0);
     return bytes > 0 ? bytes : 0;
   }
-  if (typeof Buffer !== 'undefined' && typeof Buffer.byteLength === 'function') {
-    return Buffer.byteLength(body, 'utf8');
-  }
 
   // Compute UTF-8 byte length directly from UTF-16 code units without allocating
   // a byte buffer (TextEncoder.encode would defeat the DoS guard on large bodies).
-  // Using body.length here would undercount non-ASCII (e.g. '€' is 1 code unit
-  // but 3 UTF-8 bytes).
+  // Valid %XX triplets count as one decoded byte; this matches the bytes that
+  // decodeURIComponent(body) would produce before Buffer re-encodes the string.
   let bytes = 0;
   for (let i = 0, len = body.length; i < len; i++) {
     const c = body.charCodeAt(i);
-    if (c < 0x80) {
+    if (c === 37 /* '%' */ && isPercentEncodedByte(body, i, len)) {
+      bytes += 1;
+      i += 2;
+    } else if (c < 0x80) {
       bytes += 1;
     } else if (c < 0x800) {
       bytes += 2;
@@ -93500,7 +95109,14 @@ const brotliOptions = {
   flush: zlib.constants.BROTLI_OPERATION_FLUSH,
   finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH
 };
+const zstdOptions = {
+  flush: zlib.constants.ZSTD_e_flush,
+  finishFlush: zlib.constants.ZSTD_e_flush
+};
 const isBrotliSupported = utils$1.isFunction(zlib.createBrotliDecompress);
+const isZstdSupported = utils$1.isFunction(zlib.createZstdDecompress);
+const ACCEPT_ENCODING = 'gzip, compress, deflate' + (isBrotliSupported ? ', br' : '');
+const ACCEPT_ENCODING_WITH_ZSTD = ACCEPT_ENCODING + (isZstdSupported ? ', zstd' : '');
 const {
   http: httpFollow,
   https: httpsFollow
@@ -93523,6 +95139,48 @@ function setFormDataHeaders$1(headers, formHeaders, policy) {
 // the request currently owning that socket across keep-alive reuse (issue #10780).
 const kAxiosSocketListener = Symbol('axios.http.socketListener');
 const kAxiosCurrentReq = Symbol('axios.http.currentReq');
+
+// Tags HttpsProxyAgent instances installed by setProxy() so the redirect path
+// can strip them without clobbering a user-supplied agent that happens to be
+// an HttpsProxyAgent.
+const kAxiosInstalledTunnel = Symbol('axios.http.installedTunnel');
+
+// Cache of CONNECT-tunneling agents keyed by proxy config so repeat requests
+// through the same proxy reuse a single agent (and its socket pool). The
+// keyspace is bounded by the set of distinct proxy configs the process uses,
+// so unbounded growth is not a concern in practice.
+const tunnelingAgentCache = new Map();
+const tunnelingAgentCacheUser = new WeakMap();
+function getTunnelingAgent(agentOptions, userHttpsAgent) {
+  const key = agentOptions.protocol + '//' + agentOptions.hostname + ':' + (agentOptions.port || '') + '#' + (agentOptions.auth || '');
+  const cache = userHttpsAgent ? tunnelingAgentCacheUser.get(userHttpsAgent) || tunnelingAgentCacheUser.set(userHttpsAgent, new Map()).get(userHttpsAgent) : tunnelingAgentCache;
+  let agent = cache.get(key);
+  if (agent) return agent;
+  // Forward the user's TLS options (custom CA, rejectUnauthorized, client cert,
+  // etc.) into the tunneling agent so they apply to the origin TLS upgrade
+  // performed after CONNECT. Our proxy fields take precedence on conflict.
+  const merged = userHttpsAgent && userHttpsAgent.options ? {
+    ...userHttpsAgent.options,
+    ...agentOptions
+  } : agentOptions;
+  agent = new HttpsProxyAgent(merged);
+  if (userHttpsAgent && userHttpsAgent.options) {
+    const originTLSOptions = {
+      ...userHttpsAgent.options
+    };
+    const callback = agent.callback;
+    agent.callback = function axiosTunnelingAgentCallback(req, opts) {
+      // HttpsProxyAgent v5 reads callback opts for the post-CONNECT origin TLS upgrade.
+      return callback.call(this, req, {
+        ...originTLSOptions,
+        ...opts
+      });
+    };
+  }
+  agent[kAxiosInstalledTunnel] = true;
+  cache.set(key, agent);
+  return agent;
+}
 const supportedProtocols = platform.protocols.map(protocol => {
   return protocol + ':';
 });
@@ -93531,7 +95189,7 @@ const supportedProtocols = platform.protocols.map(protocol => {
 // Decode before composing the `auth` option so credentials such as
 // `my%40email.com:pass` are sent as `my@email.com:pass`. Falls back to the
 // original value for malformed input so a bad encoding never throws.
-const decodeURIComponentSafe = value => {
+const decodeURIComponentSafe$1 = value => {
   if (!utils$1.isString(value)) {
     return value;
   }
@@ -93545,84 +95203,11 @@ const flushOnFinish = (stream, [throttled, flush]) => {
   stream.on('end', flush).on('error', flush);
   return throttled;
 };
-class Http2Sessions {
-  constructor() {
-    this.sessions = Object.create(null);
-  }
-  getSession(authority, options) {
-    options = Object.assign({
-      sessionTimeout: 1000
-    }, options);
-    let authoritySessions = this.sessions[authority];
-    if (authoritySessions) {
-      let len = authoritySessions.length;
-      for (let i = 0; i < len; i++) {
-        const [sessionHandle, sessionOptions] = authoritySessions[i];
-        if (!sessionHandle.destroyed && !sessionHandle.closed && util.isDeepStrictEqual(sessionOptions, options)) {
-          return sessionHandle;
-        }
-      }
-    }
-    const session = http2.connect(authority, options);
-    let removed;
-    const removeSession = () => {
-      if (removed) {
-        return;
-      }
-      removed = true;
-      let entries = authoritySessions,
-        len = entries.length,
-        i = len;
-      while (i--) {
-        if (entries[i][0] === session) {
-          if (len === 1) {
-            delete this.sessions[authority];
-          } else {
-            entries.splice(i, 1);
-          }
-          if (!session.closed) {
-            session.close();
-          }
-          return;
-        }
-      }
-    };
-    const originalRequestFn = session.request;
-    const {
-      sessionTimeout
-    } = options;
-    if (sessionTimeout != null) {
-      let timer;
-      let streamsCount = 0;
-      session.request = function () {
-        const stream = originalRequestFn.apply(this, arguments);
-        streamsCount++;
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        stream.once('close', () => {
-          if (! --streamsCount) {
-            timer = setTimeout(() => {
-              timer = null;
-              removeSession();
-            }, sessionTimeout);
-          }
-        });
-        return stream;
-      };
-    }
-    session.once('close', removeSession);
-    let entry = [session, options];
-    authoritySessions ? authoritySessions.push(entry) : authoritySessions = this.sessions[authority] = [entry];
-    return session;
-  }
-}
 const http2Sessions = new Http2Sessions();
 
 /**
- * If the proxy or config beforeRedirects functions are defined, call them with the options
- * object.
+ * If the proxy, auth, sensitive header, or config beforeRedirects functions are defined,
+ * call them with the options object.
  *
  * @param {Object<string, any>} options - The options object that was passed to the request.
  *
@@ -93632,8 +95217,35 @@ function dispatchBeforeRedirect(options, responseDetails, requestDetails) {
   if (options.beforeRedirects.proxy) {
     options.beforeRedirects.proxy(options);
   }
+  if (options.beforeRedirects.auth) {
+    options.beforeRedirects.auth(options);
+  }
+  if (options.beforeRedirects.sensitiveHeaders) {
+    options.beforeRedirects.sensitiveHeaders(options, requestDetails);
+  }
   if (options.beforeRedirects.config) {
     options.beforeRedirects.config(options, responseDetails, requestDetails);
+  }
+}
+function stripMatchingHeaders(headers, sensitiveSet) {
+  if (!headers) {
+    return;
+  }
+  Object.keys(headers).forEach(header => {
+    if (sensitiveSet.has(header.toLowerCase())) {
+      delete headers[header];
+    }
+  });
+}
+function isSameOriginRedirect(redirectOptions, requestDetails) {
+  if (!requestDetails) {
+    return false;
+  }
+  try {
+    return new URL(requestDetails.url).origin === new URL(redirectOptions.href).origin;
+  } catch (e) {
+    // If origin comparison fails, treat the redirect as unsafe.
+    return false;
   }
 }
 
@@ -93646,7 +95258,7 @@ function dispatchBeforeRedirect(options, responseDetails, requestDetails) {
  *
  * @returns {http.ClientRequestArgs}
  */
-function setProxy(options, configProxy, location, isRedirect) {
+function setProxy(options, configProxy, location, isRedirect, configHttpsAgent) {
   let proxy = configProxy;
   if (!proxy && proxy !== false) {
     const proxyUrl = getProxyForUrl(location);
@@ -93666,6 +95278,13 @@ function setProxy(options, configProxy, location, isRedirect) {
         delete options.headers[name];
       }
     }
+  }
+  // Strip any tunneling agent we installed for the previous hop so a redirect
+  // that drops the proxy or crosses an HTTPS↔HTTP boundary doesn't reuse a
+  // stale one. Match on our Symbol marker so a user-supplied HttpsProxyAgent
+  // (which won't carry the marker) is left alone.
+  if (isRedirect && options.agent && options.agent[kAxiosInstalledTunnel]) {
+    options.agent = undefined;
   }
   if (proxy) {
     // Read proxy fields without traversing the prototype chain. URL instances expose
@@ -93699,37 +95318,84 @@ function setProxy(options, configProxy, location, isRedirect) {
           proxy
         });
       }
-      const base64 = Buffer.from(proxyAuth, 'utf8').toString('base64');
-      options.headers['Proxy-Authorization'] = 'Basic ' + base64;
     }
-
-    // Preserve a user-supplied Host header (case-insensitive) so callers can override
-    // the value forwarded to the proxy; otherwise default to the request URL's host.
-    let hasUserHostHeader = false;
-    for (const name of Object.keys(options.headers)) {
-      if (name.toLowerCase() === 'host') {
-        hasUserHostHeader = true;
-        break;
+    const targetIsHttps = isHttps.test(options.protocol);
+    if (targetIsHttps) {
+      // CONNECT-tunneling path for HTTPS targets. Preserves end-to-end TLS to
+      // the origin so the proxy cannot inspect the URL, headers, or body — the
+      // behavior already promised by THREATMODEL.md (T-R9). HttpsProxyAgent
+      // sends Proxy-Authorization on the CONNECT request only, never on the
+      // wrapped TLS request, which is why we don't stamp it onto
+      // options.headers here. If the user already supplied an HttpsProxyAgent,
+      // they own tunneling end-to-end and we leave them alone; otherwise we
+      // install our own tunneling agent and forward their TLS options (if any)
+      // so a custom httpsAgent for cert pinning / rejectUnauthorized still
+      // applies to the origin TLS upgrade.
+      if (!(configHttpsAgent instanceof HttpsProxyAgent)) {
+        const proxyHost = readProxyField('hostname') || readProxyField('host');
+        const proxyPort = readProxyField('port');
+        const rawProxyProtocol = readProxyField('protocol');
+        const normalizedProtocol = rawProxyProtocol ? rawProxyProtocol.includes(':') ? rawProxyProtocol : `${rawProxyProtocol}:` : 'http:';
+        // Bracket IPv6 literals for URL parsing; URL.hostname strips the
+        // brackets again on read so the agent receives the raw form.
+        const proxyHostForURL = proxyHost && proxyHost.includes(':') && !proxyHost.startsWith('[') ? `[${proxyHost}]` : proxyHost;
+        const proxyURL = new URL(`${normalizedProtocol}//${proxyHostForURL}${proxyPort ? ':' + proxyPort : ''}`);
+        const agentOptions = {
+          protocol: proxyURL.protocol,
+          hostname: proxyURL.hostname.replace(/^\[|\]$/g, ''),
+          port: proxyURL.port,
+          auth: proxyAuth && typeof proxyAuth === 'string' ? proxyAuth : undefined
+        };
+        if (proxyURL.protocol === 'https:') {
+          agentOptions.ALPNProtocols = ['http/1.1'];
+        }
+        const tunnelingAgent = getTunnelingAgent(agentOptions, configHttpsAgent);
+        // Set both: `options.agent` is consumed by the native https.request path
+        // (maxRedirects === 0); `options.agents.https` is consumed by
+        // follow-redirects, which ignores `options.agent` when `options.agents`
+        // is present.
+        options.agent = tunnelingAgent;
+        if (options.agents) {
+          options.agents.https = tunnelingAgent;
+        }
       }
-    }
-    if (!hasUserHostHeader) {
-      options.headers.host = options.hostname + (options.port ? ':' + options.port : '');
-    }
-    const proxyHost = readProxyField('hostname') || readProxyField('host');
-    options.hostname = proxyHost;
-    // Replace 'host' since options is not a URL object
-    options.host = proxyHost;
-    options.port = readProxyField('port');
-    options.path = location;
-    const proxyProtocol = readProxyField('protocol');
-    if (proxyProtocol) {
-      options.protocol = proxyProtocol.includes(':') ? proxyProtocol : `${proxyProtocol}:`;
+    } else {
+      // Forward-proxy mode for plaintext HTTP targets. The request line carries
+      // the absolute URL and the proxy sees everything — acceptable for plain
+      // HTTP since the wire was already plaintext.
+      if (proxyAuth) {
+        const base64 = Buffer.from(proxyAuth, 'utf8').toString('base64');
+        options.headers['Proxy-Authorization'] = 'Basic ' + base64;
+      }
+
+      // Preserve a user-supplied Host header (case-insensitive) so callers can override
+      // the value forwarded to the proxy; otherwise default to the request URL's host.
+      let hasUserHostHeader = false;
+      for (const name of Object.keys(options.headers)) {
+        if (name.toLowerCase() === 'host') {
+          hasUserHostHeader = true;
+          break;
+        }
+      }
+      if (!hasUserHostHeader) {
+        options.headers.host = options.hostname + (options.port ? ':' + options.port : '');
+      }
+      const proxyHost = readProxyField('hostname') || readProxyField('host');
+      options.hostname = proxyHost;
+      // Replace 'host' since options is not a URL object
+      options.host = proxyHost;
+      options.port = readProxyField('port');
+      options.path = location;
+      const proxyProtocol = readProxyField('protocol');
+      if (proxyProtocol) {
+        options.protocol = proxyProtocol.includes(':') ? proxyProtocol : `${proxyProtocol}:`;
+      }
     }
   }
   options.beforeRedirects.proxy = function beforeRedirect(redirectOptions) {
     // Configure proxy for redirected request, passing the original config proxy to apply
     // the exact same logic as if the redirected request was performed by axios directly.
-    setProxy(redirectOptions, configProxy, redirectOptions.href, true);
+    setProxy(redirectOptions, configProxy, redirectOptions.href, true, configHttpsAgent);
   };
 }
 const isHttpAdapterSupported = typeof process !== 'undefined' && utils$1.kindOf(process) === 'process';
@@ -93812,7 +95478,13 @@ const http2Transport = {
 /*eslint consistent-return:0*/
 var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
   return wrapAsync(async function dispatchHttpRequest(resolve, reject, onDone) {
-    const own = key => utils$1.hasOwnProp(config, key) ? config[key] : undefined;
+    // Read config pollution-safely: own properties and members inherited from
+    // a non-Object.prototype source (e.g. an Object.create(defaults) template)
+    // are honored, but values injected onto a polluted Object.prototype are
+    // ignored. All behavior-affecting reads in this adapter go through own()
+    // so the protection boundary stays consistent.
+    const own = key => utils$1.getSafeProp(config, key);
+    const transitional = own('transitional') || transitionalDefaults;
     let data = own('data');
     let lookup = own('lookup');
     let family = own('family');
@@ -93821,7 +95493,13 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
     let http2Options = own('http2Options');
     const responseType = own('responseType');
     const responseEncoding = own('responseEncoding');
-    const method = config.method.toUpperCase();
+    const httpAgent = own('httpAgent');
+    const httpsAgent = own('httpsAgent');
+    const method = own('method').toUpperCase();
+    const maxRedirects = own('maxRedirects');
+    const maxBodyLength = own('maxBodyLength');
+    const maxContentLength = own('maxContentLength');
+    const decompress = own('decompress');
     let isDone;
     let rejected = false;
     let req;
@@ -93852,7 +95530,7 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       try {
         abortEmitter.emit('abort', !reason || reason.type ? new CanceledError(null, config, req) : reason);
       } catch (err) {
-        console.warn('emit error', err);
+        // ignore emit errors
       }
     }
     function clearConnectPhaseTimer() {
@@ -93862,10 +95540,11 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       }
     }
     function createTimeoutError() {
-      let timeoutErrorMessage = config.timeout ? 'timeout of ' + config.timeout + 'ms exceeded' : 'timeout exceeded';
-      const transitional = config.transitional || transitionalDefaults;
-      if (config.timeoutErrorMessage) {
-        timeoutErrorMessage = config.timeoutErrorMessage;
+      const configTimeout = own('timeout');
+      let timeoutErrorMessage = configTimeout ? 'timeout of ' + configTimeout + 'ms exceeded' : 'timeout exceeded';
+      const configTimeoutErrorMessage = own('timeoutErrorMessage');
+      if (configTimeoutErrorMessage) {
+        timeoutErrorMessage = configTimeoutErrorMessage;
       }
       return new AxiosError(timeoutErrorMessage, transitional.clarifyTimeoutError ? AxiosError.ETIMEDOUT : AxiosError.ECONNABORTED, config, req);
     }
@@ -93908,17 +95587,17 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
     });
 
     // Parse url
-    const fullPath = buildFullPath(config.baseURL, config.url, config.allowAbsoluteUrls);
+    const fullPath = buildFullPath(own('baseURL'), own('url'), own('allowAbsoluteUrls'), config);
     const parsed = new URL(fullPath, platform.hasBrowserEnv ? platform.origin : undefined);
     const protocol = parsed.protocol || supportedProtocols[0];
     if (protocol === 'data:') {
       // Apply the same semantics as HTTP: only enforce if a finite, non-negative cap is set.
-      if (config.maxContentLength > -1) {
-        // Use the exact string passed to fromDataURI (config.url); fall back to fullPath if needed.
-        const dataUrl = String(config.url || fullPath || '');
+      if (maxContentLength > -1) {
+        // Use the exact string passed to fromDataURI (the configured url); fall back to fullPath if needed.
+        const dataUrl = String(own('url') || fullPath || '');
         const estimated = estimateDataURLDecodedBytes(dataUrl);
-        if (estimated > config.maxContentLength) {
-          return reject(new AxiosError('maxContentLength size of ' + config.maxContentLength + ' exceeded', AxiosError.ERR_BAD_RESPONSE, config));
+        if (estimated > maxContentLength) {
+          return reject(new AxiosError('maxContentLength size of ' + maxContentLength + ' exceeded', AxiosError.ERR_BAD_RESPONSE, config));
         }
       }
       let convertedData;
@@ -93931,7 +95610,7 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
         });
       }
       try {
-        convertedData = fromDataURI(config.url, responseType === 'blob', {
+        convertedData = fromDataURI(own('url'), responseType === 'blob', {
           Blob: config.env && config.env.Blob
         });
       } catch (err) {
@@ -94005,7 +95684,7 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
 
       // Add Content-Length header if data exists
       headers.setContentLength(data.length, false);
-      if (config.maxBodyLength > -1 && data.length > config.maxBodyLength) {
+      if (maxBodyLength > -1 && data.length > maxBodyLength) {
         return reject(new AxiosError('Request body larger than maxBodyLength limit', AxiosError.ERR_BAD_REQUEST, config));
       }
     }
@@ -94032,37 +95711,37 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
     let auth = undefined;
     const configAuth = own('auth');
     if (configAuth) {
-      const username = configAuth.username || '';
-      const password = configAuth.password || '';
+      const username = utils$1.getSafeProp(configAuth, 'username') || '';
+      const password = utils$1.getSafeProp(configAuth, 'password') || '';
       auth = username + ':' + password;
     }
-    if (!auth && parsed.username) {
-      const urlUsername = decodeURIComponentSafe(parsed.username);
-      const urlPassword = decodeURIComponentSafe(parsed.password);
+    if (!auth && (parsed.username || parsed.password)) {
+      const urlUsername = decodeURIComponentSafe$1(parsed.username);
+      const urlPassword = decodeURIComponentSafe$1(parsed.password);
       auth = urlUsername + ':' + urlPassword;
     }
     auth && headers.delete('authorization');
     let path$1;
     try {
-      path$1 = buildURL(parsed.pathname + parsed.search, config.params, config.paramsSerializer).replace(/^\?/, '');
+      path$1 = buildURL(parsed.pathname + parsed.search, own('params'), own('paramsSerializer')).replace(/^\?/, '');
     } catch (err) {
       const customErr = new Error(err.message);
       customErr.config = config;
-      customErr.url = config.url;
+      customErr.url = own('url');
       customErr.exists = true;
       return reject(customErr);
     }
-    headers.set('Accept-Encoding', 'gzip, compress, deflate' + (isBrotliSupported ? ', br' : ''), false);
+    headers.set('Accept-Encoding', utils$1.hasOwnProp(transitional, 'advertiseZstdAcceptEncoding') && transitional.advertiseZstdAcceptEncoding === true ? ACCEPT_ENCODING_WITH_ZSTD : ACCEPT_ENCODING, false);
 
     // Null-prototype to block prototype pollution gadgets on properties read
     // directly by Node's http.request (e.g. insecureHTTPParser, lookup).
     const options = Object.assign(Object.create(null), {
       path: path$1,
       method: method,
-      headers: headers.toJSON(),
+      headers: toByteStringHeaderObject(headers),
       agents: {
-        http: config.httpAgent,
-        https: config.httpsAgent
+        http: httpAgent,
+        https: httpsAgent
       },
       auth,
       protocol,
@@ -94074,50 +95753,101 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
 
     // cacheable-lookup integration hotfix
     !utils$1.isUndefined(lookup) && (options.lookup = lookup);
-    if (config.socketPath) {
-      if (typeof config.socketPath !== 'string') {
+    const socketPath = own('socketPath');
+    if (socketPath) {
+      if (typeof socketPath !== 'string') {
         return reject(new AxiosError('socketPath must be a string', AxiosError.ERR_BAD_OPTION_VALUE, config));
       }
-      if (config.allowedSocketPaths != null) {
-        const allowed = Array.isArray(config.allowedSocketPaths) ? config.allowedSocketPaths : [config.allowedSocketPaths];
-        const resolvedSocket = path.resolve(config.socketPath);
+      const allowedSocketPaths = own('allowedSocketPaths');
+      if (allowedSocketPaths != null) {
+        const allowed = Array.isArray(allowedSocketPaths) ? allowedSocketPaths : [allowedSocketPaths];
+        const resolvedSocket = path.resolve(socketPath);
         const isAllowed = allowed.some(entry => typeof entry === 'string' && path.resolve(entry) === resolvedSocket);
         if (!isAllowed) {
-          return reject(new AxiosError(`socketPath "${config.socketPath}" is not permitted by allowedSocketPaths`, AxiosError.ERR_BAD_OPTION_VALUE, config));
+          return reject(new AxiosError(`socketPath "${socketPath}" is not permitted by allowedSocketPaths`, AxiosError.ERR_BAD_OPTION_VALUE, config));
         }
       }
-      options.socketPath = config.socketPath;
+      options.socketPath = socketPath;
     } else {
       options.hostname = parsed.hostname.startsWith('[') ? parsed.hostname.slice(1, -1) : parsed.hostname;
       options.port = parsed.port;
-      setProxy(options, config.proxy, protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path);
+      setProxy(options, own('proxy'), protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path, false, httpsAgent);
     }
     let transport;
     let isNativeTransport = false;
+    // True only for the follow-redirects transport, which applies
+    // options.maxBodyLength itself. Every other transport (http2, native
+    // http/https, a user-supplied custom transport) needs the explicit
+    // byte-counting pipeline below to enforce maxBodyLength on streamed uploads.
+    let transportEnforcesMaxBodyLength = false;
     const isHttpsRequest = isHttps.test(options.protocol);
-    options.agent = isHttpsRequest ? config.httpsAgent : config.httpAgent;
+    // Don't clobber a CONNECT-tunneling agent installed by setProxy() for an
+    // HTTPS target.
+    if (options.agent == null) {
+      options.agent = isHttpsRequest ? httpsAgent : httpAgent;
+    }
     if (isHttp2) {
       transport = http2Transport;
     } else {
       const configTransport = own('transport');
       if (configTransport) {
         transport = configTransport;
-      } else if (config.maxRedirects === 0) {
+      } else if (maxRedirects === 0) {
         transport = isHttpsRequest ? https : http;
         isNativeTransport = true;
       } else {
-        if (config.maxRedirects) {
-          options.maxRedirects = config.maxRedirects;
+        transportEnforcesMaxBodyLength = true;
+        options.sensitiveHeaders = [];
+        if (maxRedirects) {
+          options.maxRedirects = maxRedirects;
         }
         const configBeforeRedirect = own('beforeRedirect');
         if (configBeforeRedirect) {
           options.beforeRedirects.config = configBeforeRedirect;
         }
+        if (auth) {
+          // Restore HTTP Basic credentials on same-origin redirects only.
+          // follow-redirects >= 1.15.8 strips Authorization on every redirect (see #6929);
+          // cross-origin stripping is the documented mitigation for T-R2 in THREATMODEL.md
+          // and is preserved by deliberately not restoring on origin change.
+          const requestOrigin = parsed.origin;
+          const authToRestore = auth;
+          options.beforeRedirects.auth = function beforeRedirectAuth(redirectOptions) {
+            try {
+              if (new URL(redirectOptions.href).origin === requestOrigin) {
+                redirectOptions.auth = authToRestore;
+              }
+            } catch (e) {
+              // ignore malformed URL: leaving auth stripped is fail-safe
+            }
+          };
+        }
+        const sensitiveHeaders = own('sensitiveHeaders');
+        if (sensitiveHeaders != null) {
+          if (!utils$1.isArray(sensitiveHeaders)) {
+            return reject(new AxiosError('sensitiveHeaders must be an array of strings', AxiosError.ERR_BAD_OPTION_VALUE, config));
+          }
+          const sensitiveSet = new Set();
+          for (const header of sensitiveHeaders) {
+            if (!utils$1.isString(header)) {
+              return reject(new AxiosError('sensitiveHeaders must be an array of strings', AxiosError.ERR_BAD_OPTION_VALUE, config));
+            }
+            sensitiveSet.add(header.toLowerCase());
+          }
+          if (sensitiveSet.size) {
+            options.sensitiveHeaders = Array.from(sensitiveSet);
+            options.beforeRedirects.sensitiveHeaders = function beforeRedirectSensitiveHeaders(redirectOptions, requestDetails) {
+              if (!isSameOriginRedirect(redirectOptions, requestDetails)) {
+                stripMatchingHeaders(redirectOptions.headers, sensitiveSet);
+              }
+            };
+          }
+        }
         transport = isHttpsRequest ? httpsFollow : httpFollow;
       }
     }
-    if (config.maxBodyLength > -1) {
-      options.maxBodyLength = config.maxBodyLength;
+    if (maxBodyLength > -1) {
+      options.maxBodyLength = maxBodyLength;
     } else {
       // follow-redirects does not skip comparison, so it should always succeed for axios -1 unlimited
       options.maxBodyLength = Infinity;
@@ -94149,7 +95879,7 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       const lastRequest = res.req || req;
 
       // if decompress disabled we should not decompress
-      if (config.decompress !== false && res.headers['content-encoding']) {
+      if (decompress !== false && res.headers['content-encoding']) {
         // if no content, but headers still say that it is encoded,
         // remove the header not confuse downstream operations
         if (method === 'HEAD' || res.statusCode === 204) {
@@ -94181,6 +95911,13 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
               streams.push(zlib.createBrotliDecompress(brotliOptions));
               delete res.headers['content-encoding'];
             }
+            break;
+          case 'zstd':
+            if (isZstdSupported) {
+              streams.push(zlib.createZstdDecompress(zstdOptions));
+              delete res.headers['content-encoding'];
+            }
+            break;
         }
       }
       responseStream = streams.length > 1 ? stream.pipeline(streams, utils$1.noop) : streams[0];
@@ -94194,8 +95931,8 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       if (responseType === 'stream') {
         // Enforce maxContentLength on streamed responses; previously this
         // was applied only to buffered responses.
-        if (config.maxContentLength > -1) {
-          const limit = config.maxContentLength;
+        if (maxContentLength > -1) {
+          const limit = maxContentLength;
           const source = responseStream;
           async function* enforceMaxContentLength() {
             let totalResponseBytes = 0;
@@ -94221,11 +95958,11 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
           totalResponseBytes += chunk.length;
 
           // make sure the content length is not over the maxContentLength if specified
-          if (config.maxContentLength > -1 && totalResponseBytes > config.maxContentLength) {
+          if (maxContentLength > -1 && totalResponseBytes > maxContentLength) {
             // stream.destroy() emit aborted event before calling reject() on Node.js v16
             rejected = true;
             responseStream.destroy();
-            abort(new AxiosError('maxContentLength size of ' + config.maxContentLength + ' exceeded', AxiosError.ERR_BAD_RESPONSE, config, lastRequest));
+            abort(new AxiosError('maxContentLength size of ' + maxContentLength + ' exceeded', AxiosError.ERR_BAD_RESPONSE, config, lastRequest));
           }
         });
         responseStream.on('aborted', function handlerStreamAborted() {
@@ -94318,9 +96055,9 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
     });
 
     // Handle request timeout
-    if (config.timeout) {
+    if (own('timeout')) {
       // This is forcing a int timeout to avoid problems if the `req` interface doesn't handle other types.
-      const timeout = parseInt(config.timeout, 10);
+      const timeout = parseInt(own('timeout'), 10);
       if (Number.isNaN(timeout)) {
         abort(new AxiosError('error trying to parse `config.timeout` to int', AxiosError.ERR_BAD_OPTION_VALUE, config, req));
         return;
@@ -94364,12 +96101,13 @@ var httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
         }
       });
 
-      // Enforce maxBodyLength for streamed uploads on the native http/https
-      // transport (maxRedirects === 0); follow-redirects enforces it on the
-      // other path.
+      // Enforce maxBodyLength for streamed uploads on every transport that
+      // does not apply options.maxBodyLength itself (native http/https, http2,
+      // and user-supplied custom transports). The follow-redirects transport
+      // enforces it on the redirected HTTP/1 path.
       let uploadStream = data;
-      if (config.maxBodyLength > -1 && config.maxRedirects === 0) {
-        const limit = config.maxBodyLength;
+      if (maxBodyLength > -1 && !transportEnforcesMaxBodyLength) {
+        const limit = maxBodyLength;
         let bytesSent = 0;
         uploadStream = stream.pipeline([data, new stream.Transform({
           transform(chunk, _enc, cb) {
@@ -94516,6 +96254,23 @@ function mergeConfig(config1, config2) {
       return getMergedValue(undefined, a);
     }
   }
+  function getMergedTransitionalOption(prop) {
+    const transitional2 = utils$1.hasOwnProp(config2, 'transitional') ? config2.transitional : undefined;
+    if (!utils$1.isUndefined(transitional2)) {
+      if (utils$1.isPlainObject(transitional2)) {
+        if (utils$1.hasOwnProp(transitional2, prop)) {
+          return transitional2[prop];
+        }
+      } else {
+        return undefined;
+      }
+    }
+    const transitional1 = utils$1.hasOwnProp(config1, 'transitional') ? config1.transitional : undefined;
+    if (utils$1.isPlainObject(transitional1) && utils$1.hasOwnProp(transitional1, prop)) {
+      return transitional1[prop];
+    }
+    return undefined;
+  }
 
   // eslint-disable-next-line consistent-return
   function mergeDirectKeys(a, b, prop) {
@@ -94568,6 +96323,13 @@ function mergeConfig(config1, config2) {
     const configValue = merge(a, b, prop);
     utils$1.isUndefined(configValue) && merge !== mergeDirectKeys || (config[prop] = configValue);
   });
+  if (utils$1.hasOwnProp(config2, 'validateStatus') && utils$1.isUndefined(config2.validateStatus) && getMergedTransitionalOption('validateStatusUndefinedResolves') === false) {
+    if (utils$1.hasOwnProp(config1, 'validateStatus')) {
+      config.validateStatus = getMergedValue(undefined, config1.validateStatus);
+    } else {
+      delete config.validateStatus;
+    }
+  }
   return config;
 }
 
@@ -94592,8 +96354,8 @@ function setFormDataHeaders(headers, formHeaders, policy) {
  *
  * @returns {string} UTF-8 bytes as a Latin-1 string
  */
-const encodeUTF8 = str => encodeURIComponent(str).replace(/%([0-9A-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-var resolveConfig = config => {
+const encodeUTF8$1 = str => encodeURIComponent(str).replace(/%([0-9A-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+function resolveConfig(config) {
   const newConfig = mergeConfig({}, config);
 
   // Read only own properties to prevent prototype pollution gadgets
@@ -94609,15 +96371,17 @@ var resolveConfig = config => {
   const allowAbsoluteUrls = own('allowAbsoluteUrls');
   const url = own('url');
   newConfig.headers = headers = AxiosHeaders.from(headers);
-  newConfig.url = buildURL(buildFullPath(baseURL, url, allowAbsoluteUrls), config.params, config.paramsSerializer);
+  newConfig.url = buildURL(buildFullPath(baseURL, url, allowAbsoluteUrls, newConfig), own('params'), own('paramsSerializer'));
 
   // HTTP basic authentication
   if (auth) {
-    headers.set('Authorization', 'Basic ' + btoa((auth.username || '') + ':' + (auth.password ? encodeUTF8(auth.password) : '')));
+    const username = utils$1.getSafeProp(auth, 'username') || '';
+    const password = utils$1.getSafeProp(auth, 'password') || '';
+    headers.set('Authorization', 'Basic ' + btoa(username + ':' + (password ? encodeUTF8$1(password) : '')));
   }
   if (utils$1.isFormData(data)) {
-    if (platform.hasStandardBrowserEnv || platform.hasStandardBrowserWebWorkerEnv) {
-      headers.setContentType(undefined); // browser handles it
+    if (platform.hasStandardBrowserEnv || platform.hasStandardBrowserWebWorkerEnv || utils$1.isReactNative(data)) {
+      headers.setContentType(undefined); // browser/web worker/RN handles it
     } else if (utils$1.isFunction(data.getHeaders)) {
       // Node.js FormData (like form-data package)
       setFormDataHeaders(headers, data.getHeaders(), own('formDataHeaderPolicy'));
@@ -94645,7 +96409,7 @@ var resolveConfig = config => {
     }
   }
   return newConfig;
-};
+}
 
 const isXHRAdapterSupported = typeof XMLHttpRequest !== 'undefined';
 var xhrAdapter = isXHRAdapterSupported && function (config) {
@@ -94767,7 +96531,7 @@ var xhrAdapter = isXHRAdapterSupported && function (config) {
 
     // Add headers to the request
     if ('setRequestHeader' in request) {
-      utils$1.forEach(requestHeaders.toJSON(), function setRequestHeader(val, key) {
+      utils$1.forEach(toByteStringHeaderObject(requestHeaders), function setRequestHeader(val, key) {
         request.setRequestHeader(key, val);
       });
     }
@@ -94823,41 +96587,41 @@ var xhrAdapter = isXHRAdapterSupported && function (config) {
 };
 
 const composeSignals = (signals, timeout) => {
-  const {
-    length
-  } = signals = signals ? signals.filter(Boolean) : [];
-  if (timeout || length) {
-    let controller = new AbortController();
-    let aborted;
-    const onabort = function (reason) {
-      if (!aborted) {
-        aborted = true;
-        unsubscribe();
-        const err = reason instanceof Error ? reason : this.reason;
-        controller.abort(err instanceof AxiosError ? err : new CanceledError(err instanceof Error ? err.message : err));
-      }
-    };
-    let timer = timeout && setTimeout(() => {
-      timer = null;
-      onabort(new AxiosError(`timeout of ${timeout}ms exceeded`, AxiosError.ETIMEDOUT));
-    }, timeout);
-    const unsubscribe = () => {
-      if (signals) {
-        timer && clearTimeout(timer);
-        timer = null;
-        signals.forEach(signal => {
-          signal.unsubscribe ? signal.unsubscribe(onabort) : signal.removeEventListener('abort', onabort);
-        });
-        signals = null;
-      }
-    };
-    signals.forEach(signal => signal.addEventListener('abort', onabort));
-    const {
-      signal
-    } = controller;
-    signal.unsubscribe = () => utils$1.asap(unsubscribe);
-    return signal;
+  signals = signals ? signals.filter(Boolean) : [];
+  if (!timeout && !signals.length) {
+    return;
   }
+  const controller = new AbortController();
+  let aborted = false;
+  const onabort = function (reason) {
+    if (!aborted) {
+      aborted = true;
+      unsubscribe();
+      const err = reason instanceof Error ? reason : this.reason;
+      controller.abort(err instanceof AxiosError ? err : new CanceledError(err instanceof Error ? err.message : err));
+    }
+  };
+  let timer = timeout && setTimeout(() => {
+    timer = null;
+    onabort(new AxiosError(`timeout of ${timeout}ms exceeded`, AxiosError.ETIMEDOUT));
+  }, timeout);
+  const unsubscribe = () => {
+    if (!signals) {
+      return;
+    }
+    timer && clearTimeout(timer);
+    timer = null;
+    signals.forEach(signal => {
+      signal.unsubscribe ? signal.unsubscribe(onabort) : signal.removeEventListener('abort', onabort);
+    });
+    signals = null;
+  };
+  signals.forEach(signal => signal.addEventListener('abort', onabort));
+  const {
+    signal
+  } = controller;
+  signal.unsubscribe = () => utils$1.asap(unsubscribe);
+  return signal;
 };
 
 const streamChunk = function* (chunk, chunkSize) {
@@ -94946,6 +96710,31 @@ const DEFAULT_CHUNK_SIZE = 64 * 1024;
 const {
   isFunction
 } = utils$1;
+
+/**
+ * Encode a UTF-8 string to a Latin-1 byte string for use with btoa().
+ * This is a modern replacement for the deprecated unescape(encodeURIComponent(str)) pattern.
+ *
+ * @param {string} str The string to encode
+ *
+ * @returns {string} UTF-8 bytes as a Latin-1 string
+ */
+const encodeUTF8 = str => encodeURIComponent(str).replace(/%([0-9A-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+// Node's WHATWG URL parser returns `username` and `password` percent-encoded.
+// Decode before composing the `auth` option so credentials such as
+// `my%40email.com:pass` are sent as `my@email.com:pass`. Falls back to the
+// original value for malformed input so a bad encoding never throws.
+const decodeURIComponentSafe = value => {
+  if (!utils$1.isString(value)) {
+    return value;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    return value;
+  }
+};
 const test = (fn, ...args) => {
   try {
     return !!fn(...args);
@@ -94953,9 +96742,16 @@ const test = (fn, ...args) => {
     return false;
   }
 };
+const maybeWithAuthCredentials = url => {
+  const protocolIndex = url.indexOf('://');
+  let urlToCheck = url;
+  if (protocolIndex !== -1) {
+    urlToCheck = urlToCheck.slice(protocolIndex + 3);
+  }
+  return urlToCheck.includes('@') || urlToCheck.includes(':');
+};
 const factory = env => {
-  var _utils$global;
-  const globalObject = (_utils$global = utils$1.global) !== null && _utils$global !== void 0 ? _utils$global : globalThis;
+  const globalObject = utils$1.global !== undefined && utils$1.global !== null ? utils$1.global : globalThis;
   const {
     ReadableStream,
     TextEncoder
@@ -95057,6 +96853,7 @@ const factory = env => {
     } = resolveConfig(config);
     const hasMaxContentLength = utils$1.isNumber(maxContentLength) && maxContentLength > -1;
     const hasMaxBodyLength = utils$1.isNumber(maxBodyLength) && maxBodyLength > -1;
+    const own = key => utils$1.hasOwnProp(config, key) ? config[key] : undefined;
     let _fetch = envFetch || fetch;
     responseType = responseType ? (responseType + '').toLowerCase() : 'text';
     let composedSignal = composeSignals([signal, cancelToken && cancelToken.toAbortSignal()], timeout);
@@ -95065,7 +96862,46 @@ const factory = env => {
       composedSignal.unsubscribe();
     });
     let requestContentLength;
+
+    // AxiosError we raise while the request body is being streamed. Captured
+    // by identity so the catch block can surface it directly, regardless of
+    // how the runtime wraps the resulting fetch rejection (undici exposes it
+    // as `err.cause`; some browsers drop the original error entirely).
+    let pendingBodyError = null;
+    const maxBodyLengthError = () => new AxiosError('Request body larger than maxBodyLength limit', AxiosError.ERR_BAD_REQUEST, config, request);
     try {
+      // HTTP basic authentication
+      let auth = undefined;
+      const configAuth = own('auth');
+      if (configAuth) {
+        const username = utils$1.getSafeProp(configAuth, 'username') || '';
+        const password = utils$1.getSafeProp(configAuth, 'password') || '';
+        auth = {
+          username,
+          password
+        };
+      }
+      if (maybeWithAuthCredentials(url)) {
+        const parsedURL = new URL(url, platform.origin);
+        if (!auth && (parsedURL.username || parsedURL.password)) {
+          const urlUsername = decodeURIComponentSafe(parsedURL.username);
+          const urlPassword = decodeURIComponentSafe(parsedURL.password);
+          auth = {
+            username: urlUsername,
+            password: urlPassword
+          };
+        }
+        if (parsedURL.username || parsedURL.password) {
+          parsedURL.username = '';
+          parsedURL.password = '';
+          url = parsedURL.href;
+        }
+      }
+      if (auth) {
+        headers.delete('authorization');
+        headers.set('Authorization', 'Basic ' + btoa(encodeUTF8((auth.username || '') + ':' + (auth.password || ''))));
+      }
+
       // Enforce maxContentLength for data: URLs up-front so we never materialize
       // an oversized payload. The HTTP adapter applies the same check (see http.js
       // "if (protocol === 'data:')" branch).
@@ -95076,30 +96912,54 @@ const factory = env => {
         }
       }
 
-      // Enforce maxBodyLength against the outbound request body before dispatch.
-      // Mirrors http.js behavior (ERR_BAD_REQUEST / 'Request body larger than
-      // maxBodyLength limit'). Skip when the body length cannot be determined
-      // (e.g. a live ReadableStream supplied by the caller).
+      // Enforce maxBodyLength against known-size bodies before dispatch using
+      // the body's *actual* size — never a caller-declared Content-Length,
+      // which could under-report to slip an oversized body past the check.
+      // Unknown-size streams return undefined here and are counted per-chunk
+      // below as fetch consumes them.
       if (hasMaxBodyLength && method !== 'get' && method !== 'head') {
-        const outboundLength = await resolveBodyLength(headers, data);
-        if (typeof outboundLength === 'number' && isFinite(outboundLength) && outboundLength > maxBodyLength) {
-          throw new AxiosError('Request body larger than maxBodyLength limit', AxiosError.ERR_BAD_REQUEST, config, request);
+        const outboundLength = await getBodyLength(data);
+        if (typeof outboundLength === 'number' && isFinite(outboundLength)) {
+          requestContentLength = outboundLength;
+          if (outboundLength > maxBodyLength) {
+            throw maxBodyLengthError();
+          }
         }
       }
-      if (onUploadProgress && supportsRequestStream && method !== 'get' && method !== 'head' && (requestContentLength = await resolveBodyLength(headers, data)) !== 0) {
-        let _request = new Request(url, {
-          method: 'POST',
-          body: data,
-          duplex: 'half'
-        });
-        let contentTypeHeader;
-        if (utils$1.isFormData(data) && (contentTypeHeader = _request.headers.get('content-type'))) {
-          headers.setContentType(contentTypeHeader);
+
+      // A streamed body under maxBodyLength must be counted as fetch consumes
+      // it; its size is never trusted from a caller-declared Content-Length.
+      const mustEnforceStreamBody = hasMaxBodyLength && (utils$1.isReadableStream(data) || utils$1.isStream(data));
+      const trackRequestStream = (stream, onProgress, flush) => trackStream(stream, DEFAULT_CHUNK_SIZE, loadedBytes => {
+        if (hasMaxBodyLength && loadedBytes > maxBodyLength) {
+          throw pendingBodyError = maxBodyLengthError();
         }
-        if (_request.body) {
-          const [onProgress, flush] = progressEventDecorator(requestContentLength, progressEventReducer(asyncDecorator(onUploadProgress)));
-          data = trackStream(_request.body, DEFAULT_CHUNK_SIZE, onProgress, flush);
+        onProgress && onProgress(loadedBytes);
+      }, flush);
+      if (supportsRequestStream && method !== 'get' && method !== 'head' && (onUploadProgress || mustEnforceStreamBody)) {
+        requestContentLength = requestContentLength == null ? await resolveBodyLength(headers, data) : requestContentLength;
+
+        // A declared length of 0 is only trusted to skip the wrap when we are
+        // not enforcing a stream limit (which must not rely on that header).
+        if (requestContentLength !== 0 || mustEnforceStreamBody) {
+          let _request = new Request(url, {
+            method: 'POST',
+            body: data,
+            duplex: 'half'
+          });
+          let contentTypeHeader;
+          if (utils$1.isFormData(data) && (contentTypeHeader = _request.headers.get('content-type'))) {
+            headers.setContentType(contentTypeHeader);
+          }
+          if (_request.body) {
+            const [onProgress, flush] = onUploadProgress && progressEventDecorator(requestContentLength, progressEventReducer(asyncDecorator(onUploadProgress))) || [];
+            data = trackRequestStream(_request.body, onProgress, flush);
+          }
         }
+      } else if (mustEnforceStreamBody && !isRequestSupported && isReadableStreamSupported && method !== 'get' && method !== 'head') {
+        data = trackRequestStream(data);
+      } else if (mustEnforceStreamBody && isRequestSupported && !supportsRequestStream && method !== 'get' && method !== 'head') {
+        throw new AxiosError('Stream request bodies are not supported by the current fetch implementation', AxiosError.ERR_NOT_SUPPORT, config, request);
       }
       if (!utils$1.isString(withCredentials)) {
         withCredentials = withCredentials ? 'include' : 'omit';
@@ -95124,18 +96984,19 @@ const factory = env => {
         ...fetchOptions,
         signal: composedSignal,
         method: method.toUpperCase(),
-        headers: headers.normalize().toJSON(),
+        headers: toByteStringHeaderObject(headers.normalize()),
         body: data,
         duplex: 'half',
         credentials: isCredentialsSupported ? withCredentials : undefined
       };
       request = isRequestSupported && new Request(url, resolvedOptions);
       let response = await (isRequestSupported ? _fetch(request, fetchOptions) : _fetch(url, resolvedOptions));
+      const responseHeaders = AxiosHeaders.from(response.headers);
 
       // Cheap pre-check: if the server honestly declares a content-length that
       // already exceeds the cap, reject before we start streaming.
       if (hasMaxContentLength) {
-        const declaredLength = utils$1.toFiniteNumber(response.headers.get('content-length'));
+        const declaredLength = utils$1.toFiniteNumber(responseHeaders.getContentLength());
         if (declaredLength != null && declaredLength > maxContentLength) {
           throw new AxiosError('maxContentLength size of ' + maxContentLength + ' exceeded', AxiosError.ERR_BAD_RESPONSE, config, request);
         }
@@ -95146,7 +97007,7 @@ const factory = env => {
         ['status', 'statusText', 'headers'].forEach(prop => {
           options[prop] = response[prop];
         });
-        const responseContentLength = utils$1.toFiniteNumber(response.headers.get('content-length'));
+        const responseContentLength = utils$1.toFiniteNumber(responseHeaders.getContentLength());
         const [onProgress, flush] = onDownloadProgress && progressEventDecorator(responseContentLength, progressEventReducer(asyncDecorator(onDownloadProgress), true)) || [];
         let bytesRead = 0;
         const onChunkProgress = loadedBytes => {
@@ -95207,6 +97068,23 @@ const factory = env => {
         request && (canceledError.request = request);
         err !== canceledError && (canceledError.cause = err);
         throw canceledError;
+      }
+
+      // Surface a maxBodyLength violation we raised while the request body was
+      // being streamed. Matching by identity (rather than reading
+      // `err.cause.isAxiosError`) keeps the error deterministic across runtimes
+      // and avoids both prototype-pollution reads and mis-attributing a foreign
+      // AxiosError that merely happened to land in `err.cause`.
+      if (pendingBodyError) {
+        request && !pendingBodyError.request && (pendingBodyError.request = request);
+        throw pendingBodyError;
+      }
+
+      // Re-throw AxiosErrors we raised synchronously (data: URL / content-length
+      // pre-checks, response size enforcement) without re-wrapping them.
+      if (err instanceof AxiosError) {
+        request && !err.request && (err.request = request);
+        throw err;
       }
       if (err && err.name === 'TypeError' && /Load failed|fetch/i.test(err.message)) {
         throw Object.assign(new AxiosError('Network Error', AxiosError.ERR_NETWORK, config, request, err && err.response), {
@@ -95582,7 +97460,9 @@ class Axios {
         silentJSONParsing: validators.transitional(validators.boolean),
         forcedJSONParsing: validators.transitional(validators.boolean),
         clarifyTimeoutError: validators.transitional(validators.boolean),
-        legacyInterceptorReqResOrdering: validators.transitional(validators.boolean)
+        legacyInterceptorReqResOrdering: validators.transitional(validators.boolean),
+        advertiseZstdAcceptEncoding: validators.transitional(validators.boolean),
+        validateStatusUndefinedResolves: validators.transitional(validators.boolean)
       }, false);
     }
     if (paramsSerializer != null) {
@@ -95679,7 +97559,7 @@ class Axios {
   }
   getUri(config) {
     config = mergeConfig(this.defaults, config);
-    const fullPath = buildFullPath(config.baseURL, config.url, config.allowAbsoluteUrls);
+    const fullPath = buildFullPath(config.baseURL, config.url, config.allowAbsoluteUrls, config);
     return buildURL(fullPath, config.params, config.paramsSerializer);
   }
 }
@@ -95691,7 +97571,7 @@ utils$1.forEach(['delete', 'get', 'head', 'options'], function forEachMethodNoDa
     return this.request(mergeConfig(config || {}, {
       method,
       url,
-      data: (config || {}).data
+      data: config && utils$1.hasOwnProp(config, 'data') ? config.data : undefined
     }));
   };
 });
@@ -96101,7 +97981,7 @@ exports.IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 exports.IQ_VERSION_TO_COMPLETE = '1.{iq-cli-version}.0-01';
 exports.DOWNLOAD_URL = 'https://download.sonatype.com/clm/scanner/nexus-iq-cli-{iq-cli-version}.jar';
 exports.MINIMUM_SUPPORTED_IQ_VERSION = 137;
-exports.LATEST_IQ_CLI_VERSION = '2.12.1-01';
+exports.LATEST_IQ_CLI_VERSION = '2.13.0-01';
 exports.INPUT_IQ_CLI_VERSION = 'iq-cli-version';
 exports.INPUT_IQ_CLI_DOWNLOAD_URL = 'iq-cli-download-url';
 exports.INPUT_IQ_CLI_DOWNLOAD_AUTH = 'iq-cli-download-auth';
@@ -97033,7 +98913,7 @@ module.exports = require("zlib");
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"comment":"SHA1 checksums for IQ CLI JAR files. Update this file when new IQ CLI versions are released.","data":[{"version":"2.12.1-01","sha1":"0a5a1f1648fb38669d8fdfa04873c373e90df26d"},{"version":"2.11.0-01","sha1":"f24600be6ee41308eeb589f8b0f1a6e980f9abfe"},{"version":"2.10.0-02","sha1":"71f244e821ea46dfc8ec054c972623b765cc7147"},{"version":"2.9.0-01","sha1":"9f5d574ab9b59fcb3e5da0a1effbd3999479020e"},{"version":"2.8.5-01","sha1":"692094121ab53f6a6c570bd2c1e1d07725b6febd"},{"version":"2.8.4-01","sha1":"bd3a9ecb769a42d3b3df5e35700fb16f2651dad6"},{"version":"2.8.3-01","sha1":"2f81596f7504622f2dad909b2a4e33a9a883216f"},{"version":"2.8.2-02","sha1":"082a4688f9e620e3aaa62dab821869475fea1648"},{"version":"2.8.1-01","sha1":"4bc23e98981a84409e1fe17e92cbe1ea48198cb9"},{"version":"2.8.0-01","sha1":"918508ac6391be29da2ad6b19f9374469d8e20b4"},{"version":"2.7.0-01","sha1":"c6785d6ebc98fd954a58e6ab4ad4d38134045a6a"},{"version":"2.6.0-01","sha1":"eb7cc18987597eeda4c191fba441a27fac59145f"},{"version":"2.5.1-02","sha1":"c8735ec6c4bd027fe2a94d1b70d64ede99e4134a"},{"version":"2.5.0-01","sha1":"95f92eda83dcca62e5cd9b6b7fd9f7787b829732"},{"version":"2.4.6-01","sha1":"6e12b84ee16d520aa830611bf9d2c4e644deddd5"},{"version":"2.4.5-01","sha1":"b12e481d9be61cd53e20753cdd2a7bc22882ba85"},{"version":"2.4.4-01","sha1":"6384c7d54c5f4382e1e63b53a4af7d47a2a79751"},{"version":"2.4.3-01","sha1":"08ceabfe157e83889c658fd2a18aa881fc98057e"},{"version":"2.4.2-01","sha1":"d1d5639fda9a1a9f04668870e1eed80eff1cc0dd"},{"version":"2.4.1-01","sha1":"5aa0e93d57964f5ed7986148434d141936c88a9b"},{"version":"2.4.0-01","sha1":"cae8a9a2fdaa2d727283552486eaa25873281cf6"},{"version":"2.3.0-02","sha1":"897f7c9091315fabdb410ba446bb5d7342f359e8"},{"version":"2.2.0-01","sha1":"97fac65743479d487a50710825fb96d9cbd71e48"},{"version":"2.1.1-01","sha1":"efa70640e880978d4c5f72bf8aa38e84b7736e62"},{"version":"2.1.0-01","sha1":"98d6e445820b5fdb83901d5dc96d9455ef23a89d"},{"version":"2.0.0-01","sha1":"0df0411a1e8317929d8dd891fb57e76ea07c95d4"},{"version":"1.185.0-01","sha1":"27f6723066951f6dc5c241699f1fac9b4a4f6bad"},{"version":"1.184.0-01","sha1":"dbd2512acedc41287f159cfa8edccbb638b9808d"},{"version":"1.183.0-01","sha1":"81b35f3e617e912bb92e47c2848233f806e0811a"},{"version":"1.182.0-01","sha1":"eda224e42eac7036b4ad5260e31862e66efcc5bd"}]}');
+module.exports = /*#__PURE__*/JSON.parse('{"comment":"SHA1 checksums for IQ CLI JAR files. Update this file when new IQ CLI versions are released.","data":[{"version":"2.13.0-01","sha1":"acf5bc346b88b41bc66e414704e24326031da45a"},{"version":"2.12.1-01","sha1":"0a5a1f1648fb38669d8fdfa04873c373e90df26d"},{"version":"2.11.0-01","sha1":"f24600be6ee41308eeb589f8b0f1a6e980f9abfe"},{"version":"2.10.0-02","sha1":"71f244e821ea46dfc8ec054c972623b765cc7147"},{"version":"2.9.0-01","sha1":"9f5d574ab9b59fcb3e5da0a1effbd3999479020e"},{"version":"2.8.5-01","sha1":"692094121ab53f6a6c570bd2c1e1d07725b6febd"},{"version":"2.8.4-01","sha1":"bd3a9ecb769a42d3b3df5e35700fb16f2651dad6"},{"version":"2.8.3-01","sha1":"2f81596f7504622f2dad909b2a4e33a9a883216f"},{"version":"2.8.2-02","sha1":"082a4688f9e620e3aaa62dab821869475fea1648"},{"version":"2.8.1-01","sha1":"4bc23e98981a84409e1fe17e92cbe1ea48198cb9"},{"version":"2.8.0-01","sha1":"918508ac6391be29da2ad6b19f9374469d8e20b4"},{"version":"2.7.0-01","sha1":"c6785d6ebc98fd954a58e6ab4ad4d38134045a6a"},{"version":"2.6.0-01","sha1":"eb7cc18987597eeda4c191fba441a27fac59145f"},{"version":"2.5.1-02","sha1":"c8735ec6c4bd027fe2a94d1b70d64ede99e4134a"},{"version":"2.5.0-01","sha1":"95f92eda83dcca62e5cd9b6b7fd9f7787b829732"},{"version":"2.4.6-01","sha1":"6e12b84ee16d520aa830611bf9d2c4e644deddd5"},{"version":"2.4.5-01","sha1":"b12e481d9be61cd53e20753cdd2a7bc22882ba85"},{"version":"2.4.4-01","sha1":"6384c7d54c5f4382e1e63b53a4af7d47a2a79751"},{"version":"2.4.3-01","sha1":"08ceabfe157e83889c658fd2a18aa881fc98057e"},{"version":"2.4.2-01","sha1":"d1d5639fda9a1a9f04668870e1eed80eff1cc0dd"},{"version":"2.4.1-01","sha1":"5aa0e93d57964f5ed7986148434d141936c88a9b"},{"version":"2.4.0-01","sha1":"cae8a9a2fdaa2d727283552486eaa25873281cf6"},{"version":"2.3.0-02","sha1":"897f7c9091315fabdb410ba446bb5d7342f359e8"},{"version":"2.2.0-01","sha1":"97fac65743479d487a50710825fb96d9cbd71e48"},{"version":"2.1.1-01","sha1":"efa70640e880978d4c5f72bf8aa38e84b7736e62"},{"version":"2.1.0-01","sha1":"98d6e445820b5fdb83901d5dc96d9455ef23a89d"},{"version":"2.0.0-01","sha1":"0df0411a1e8317929d8dd891fb57e76ea07c95d4"},{"version":"1.185.0-01","sha1":"27f6723066951f6dc5c241699f1fac9b4a4f6bad"},{"version":"1.184.0-01","sha1":"dbd2512acedc41287f159cfa8edccbb638b9808d"},{"version":"1.183.0-01","sha1":"81b35f3e617e912bb92e47c2848233f806e0811a"},{"version":"1.182.0-01","sha1":"eda224e42eac7036b4ad5260e31862e66efcc5bd"}]}');
 
 /***/ })
 

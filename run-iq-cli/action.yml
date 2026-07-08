@@ -183,6 +183,14 @@ outputs:
     description: 'The path to the SARIF file to upload as artifact'
   scan-file-path:
     description: 'The path to the Scan file to upload as artifact'
+  cli-exit-code:
+    description:
+      'Exit code returned by the IQ CLI (0=SUCCESS, 1=POLICY_VIOLATION, 2=SCANNING_ERROR, 3=REACHABILITY_ERROR,
+      4=CONFIGURATION_ERROR, 5=CONNECTIVITY_ERROR, 6=LOCAL_IO_ERROR, 7=AUTH_ERROR, 99=INTERNAL_ERROR)'
+  cli-exit-category:
+    description: 'Category name for the exit code (e.g., SUCCESS, POLICY_VIOLATION, CONNECTIVITY_ERROR)'
+  cli-exit-message:
+    description: 'Message associated with the exit code from the IQ CLI'
 
 runs:
   using: node24

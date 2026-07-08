@@ -37,7 +37,7 @@ jobs:
 
       # Sonatype CLI requires Java to run
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -57,31 +57,31 @@ jobs:
 
 ### Prerequisites
 
-* .NET 8 SDK or runtime installed on the runner
+- .NET 8 SDK or runtime installed on the runner
 
 ```yaml
-    - name: Run Sonatype CLI with .NET Reachability
-      uses: sonatype/actions/run-iq-cli@v1
-      with:
-        iq-server-url: https://your.lifecycle.server
-        username: ${{ secrets.LIFECYCLE_USERNAME }}
-        password: ${{ secrets.LIFECYCLE_PASSWORD }}
-        application-id: my-dotnet-app
-        scan-targets: ./publish
-        enable-reachability-dotnet: true
-        reachability-dotnet-namespaces: MyCompany.App MyCompany.Core
-        reachability-dotnet-entrypoint-strategy: DOTNET_MAIN
+- name: Run Sonatype CLI with .NET Reachability
+  uses: sonatype/actions/run-iq-cli@v1
+  with:
+    iq-server-url: https://your.lifecycle.server
+    username: ${{ secrets.LIFECYCLE_USERNAME }}
+    password: ${{ secrets.LIFECYCLE_PASSWORD }}
+    application-id: my-dotnet-app
+    scan-targets: ./publish
+    enable-reachability-dotnet: true
+    reachability-dotnet-namespaces: MyCompany.App MyCompany.Core
+    reachability-dotnet-entrypoint-strategy: DOTNET_MAIN
 ```
 
 ### Choosing an Entrypoint Strategy
 
-| Strategy | Use Case |
-|----------|----------|
-| `DOTNET_MAIN` | Console applications with a `Main` method entry point |
-| `CONCRETE` | ASP.NET applications or apps with well-defined entry points |
-| `PUBLIC_CONCRETE` | Class libraries where public methods are the entry points |
-| `ACCESSIBLE_CONCRETE` | Libraries with broader access patterns |
-| `ALL` | Comprehensive analysis covering all possible entry points |
+| Strategy              | Use Case                                                    |
+| --------------------- | ----------------------------------------------------------- |
+| `DOTNET_MAIN`         | Console applications with a `Main` method entry point       |
+| `CONCRETE`            | ASP.NET applications or apps with well-defined entry points |
+| `PUBLIC_CONCRETE`     | Class libraries where public methods are the entry points   |
+| `ACCESSIBLE_CONCRETE` | Libraries with broader access patterns                      |
+| `ALL`                 | Comprehensive analysis covering all possible entry points   |
 
 ## Parameters
 
@@ -243,8 +243,8 @@ absolute path to the `dotnet` executable via the `reachability-dotnet-path` inpu
 
 **Symptom:** The analysis completes but reports no reachability data, or warns that no assemblies were found.
 
-**Solution:** Ensure your .NET project is built or published before running the scan. The reachability analysis
-operates on compiled assemblies (`.dll` files), not source code. Add a build step before the scan:
+**Solution:** Ensure your .NET project is built or published before running the scan. The reachability analysis operates
+on compiled assemblies (`.dll` files), not source code. Add a build step before the scan:
 
 ```yaml
 - name: Build .NET project

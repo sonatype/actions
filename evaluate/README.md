@@ -34,7 +34,7 @@ jobs:
       # Check out your code
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       # Perform an evaluation
       - name: Run evaluate  action
         id: evaluate
@@ -199,7 +199,7 @@ jobs:
       # Check out your code
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       # Perform an evaluation
       - name: Run evaluate  action
         id: evaluate
