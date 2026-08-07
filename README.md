@@ -64,3 +64,7 @@ jobs:
 ```
 
 For more details on the supported parameters for each action, refer to the individual action documentation.
+
+## License
+
+This project is licensed under the Sonatype Integration Terms EULA — see [LICENSE](LICENSE) and https://www.sonatype.com/dnt/usage/integration-api-eula.
