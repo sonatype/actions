@@ -46,6 +46,15 @@ from the specified location URL.
 > **iq-cli-download-auth**\
 > Credentials for accessing the IQ CLI download URL. Format: `username:password`. Basic authentication is used.
 
+> **proxy**\
+> Specify a proxy to use when connecting to Lifecycle (IQ Server) for configuration retrieval. This property is set
+> using the format `host[:port]`. Do not include a scheme: a value such as `http://proxy:8888` is parsed as the host
+> name `http`. `Optional`
+
+> **proxy-user**\
+> Specify proxy credentials in the following format: `username:password`. The password cannot contain a colon.
+> `Optional`
+
 ## Output
 
 > **iq-cli-version**\

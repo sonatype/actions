@@ -107,10 +107,12 @@ jobs:
 
 > **proxy**\
 > Specify a proxy to use when connecting to Lifecycle (IQ Server). This property is set using the format `host[:port]`,
-> otherwise, the CLI uses the default HTTP proxy set with the JVM.' `Optional`
+> otherwise, the CLI uses the default HTTP proxy set with the JVM. Do not include a scheme: a value such as
+> `http://proxy:8888` is parsed as the host name `http`. `Optional`
 
 > **proxy-user**\
-> Specify proxy credentials in the following format: `username:password`. `Optional`
+> Specify proxy credentials in the following format: `username:password`. The password cannot contain a colon.
+> `Optional`
 
 > **include-sha-256**\
 > If set, SHA256 checksums are included in the scan file. Default: `false`. `Optional`

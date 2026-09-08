@@ -63,6 +63,14 @@ jobs:
 > **application-id**\
 > Lifecycle (IQ Server) application ID. `Required`
 
+> **proxy**\
+> Specify a proxy to use when connecting to Lifecycle (IQ Server). This property is set using the format `host[:port]`.
+> Do not include a scheme: a value such as `http://proxy:8888` is parsed as the host name `http`. `Optional`
+
+> **proxy-user**\
+> Specify proxy credentials in the following format: `username:password`. The password cannot contain a colon.
+> `Optional`
+
 > **scan-id**\
 > The scan ID to fetch the report. `Required`
 

@@ -34,8 +34,8 @@ import 'child_process';
 import 'timers';
 import * as stream from 'stream';
 import stream__default, { Readable } from 'stream';
-import require$$5 from 'url';
 import require$$1$1 from 'tty';
+import require$$5 from 'url';
 import http2 from 'http2';
 import zlib from 'zlib';
 
@@ -188,6 +188,96 @@ function prepareKeyValueMessage(key, value) {
         throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
     }
     return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+}
+
+function getProxyUrl(reqUrl) {
+    const usingSsl = reqUrl.protocol === 'https:';
+    if (checkBypass(reqUrl)) {
+        return undefined;
+    }
+    const proxyVar = (() => {
+        if (usingSsl) {
+            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
+        }
+        else {
+            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
+        }
+    })();
+    if (proxyVar) {
+        try {
+            return new DecodedURL(proxyVar);
+        }
+        catch (_a) {
+            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
+                return new DecodedURL(`http://${proxyVar}`);
+        }
+    }
+    else {
+        return undefined;
+    }
+}
+function checkBypass(reqUrl) {
+    if (!reqUrl.hostname) {
+        return false;
+    }
+    const reqHost = reqUrl.hostname;
+    if (isLoopbackAddress(reqHost)) {
+        return true;
+    }
+    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
+    if (!noProxy) {
+        return false;
+    }
+    // Determine the request port
+    let reqPort;
+    if (reqUrl.port) {
+        reqPort = Number(reqUrl.port);
+    }
+    else if (reqUrl.protocol === 'http:') {
+        reqPort = 80;
+    }
+    else if (reqUrl.protocol === 'https:') {
+        reqPort = 443;
+    }
+    // Format the request hostname and hostname with port
+    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
+    if (typeof reqPort === 'number') {
+        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
+    }
+    // Compare request host against noproxy
+    for (const upperNoProxyItem of noProxy
+        .split(',')
+        .map(x => x.trim().toUpperCase())
+        .filter(x => x)) {
+        if (upperNoProxyItem === '*' ||
+            upperReqHosts.some(x => x === upperNoProxyItem ||
+                x.endsWith(`.${upperNoProxyItem}`) ||
+                (upperNoProxyItem.startsWith('.') &&
+                    x.endsWith(`${upperNoProxyItem}`)))) {
+            return true;
+        }
+    }
+    return false;
+}
+function isLoopbackAddress(host) {
+    const hostLower = host.toLowerCase();
+    return (hostLower === 'localhost' ||
+        hostLower.startsWith('127.') ||
+        hostLower.startsWith('[::1]') ||
+        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
+class DecodedURL extends URL {
+    constructor(url, base) {
+        super(url, base);
+        this._decodedUsername = decodeURIComponent(super.username);
+        this._decodedPassword = decodeURIComponent(super.password);
+    }
+    get username() {
+        return this._decodedUsername;
+    }
+    get password() {
+        return this._decodedPassword;
+    }
 }
 
 function getDefaultExportFromCjs (x) {
@@ -11024,7 +11114,7 @@ function requireClientH1 () {
 
 	function clearIdleSocketValidation (socket) {
 	  if (socket[kIdleSocketValidationTimeout]) {
-	    clearTimeout(socket[kIdleSocketValidationTimeout]);
+	    clearImmediate(socket[kIdleSocketValidationTimeout]);
 	    socket[kIdleSocketValidationTimeout] = null;
 	  }
 
@@ -11033,15 +11123,23 @@ function requireClientH1 () {
 
 	function scheduleIdleSocketValidation (client, socket) {
 	  socket[kIdleSocketValidation] = 1;
-	  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+	  // Yield to the check phase (after poll) so unsolicited bytes / FIN / RST
+	  // already pending on this idle keep-alive socket are processed before the
+	  // next request is written (GHSA-35p6-xmwp-9g52).
+	  //
+	  // setTimeout(0) pays Node's ~1ms timer floor on every sequential reuse
+	  // (#5493). setImmediate avoids that, but an *unref'd* Immediate lets poll
+	  // block for ~500ms when the event loop is otherwise idle (#5600 / #5606).
+	  // A ref'd Immediate both keeps the pending request alive and makes poll
+	  // return immediately — the hybrid those issues asked for.
+	  socket[kIdleSocketValidationTimeout] = setImmediate(() => {
 	    socket[kIdleSocketValidationTimeout] = null;
 	    socket[kIdleSocketValidation] = 2;
 
 	    if (client[kSocket] === socket && !socket.destroyed) {
 	      client[kResume]();
 	    }
-	  }, 0);
-	  socket[kIdleSocketValidationTimeout].unref?.();
+	  });
 	}
 
 	/**
@@ -11759,7 +11857,9 @@ function requireClientH2 () {
 	  RequestAbortedError,
 	  SocketError,
 	  InformationalError,
-	  InvalidArgumentError
+	  InvalidArgumentError,
+	  HeadersTimeoutError,
+	  BodyTimeoutError
 	} = requireErrors();
 	const {
 	  kUrl,
@@ -11784,6 +11884,7 @@ function requireClientH2 () {
 	  kHTTPContext,
 	  kClosed,
 	  kBodyTimeout,
+	  kHeadersTimeout,
 	  kEnableConnectProtocol,
 	  kRemoteSettings,
 	  kHTTP2Stream,
@@ -11970,7 +12071,11 @@ function requireClientH2 () {
 	  const socket = client[kSocket];
 
 	  if (socket?.destroyed === false) {
-	    if (client[kSize] === 0 || client[kMaxConcurrentStreams] === 0) {
+	    // Only let the process exit when there is genuinely nothing outstanding.
+	    // Unreffing because the peer advertised MAX_CONCURRENT_STREAMS = 0 left
+	    // queued requests with nothing holding the event loop open, so the process
+	    // could exit with status 0 while an awaited request never settled.
+	    if (client[kSize] === 0) {
 	      socket.unref();
 	      client[kHTTP2Session].unref();
 	    } else {
@@ -12065,6 +12170,36 @@ function requireClientH2 () {
 	 * @this {import('http2').ClientHttp2Session}
 	 * @param {number} errorCode
 	 */
+	// Backport of #5410 and #5569. HTTP/2 multiplexes, so requests complete out of
+	// order; advancing kRunningIdx blindly retired whichever request happened to
+	// sit at the head instead of the one that actually finished, which both lost
+	// requests and left phantom running slots behind.
+	function completeRequest (client, request, resetPendingIdx = false) {
+	  const queue = client[kQueue];
+	  const runningIdx = client[kRunningIdx];
+
+	  // In-order completion: clear the request and advance without splicing.
+	  // The client's resume loop compacts cleared slots once the index grows.
+	  if (runningIdx < client[kPendingIdx] && queue[runningIdx] === request) {
+	    queue[runningIdx] = null;
+	    client[kRunningIdx] = runningIdx + 1;
+	    return
+	  }
+
+	  const index = queue.indexOf(request, runningIdx);
+
+	  if (index === -1 || index >= client[kPendingIdx]) {
+	    return
+	  }
+
+	  queue.splice(index, 1);
+	  client[kPendingIdx]--;
+
+	  if (resetPendingIdx && client[kPendingIdx] < client[kRunningIdx]) {
+	    client[kPendingIdx] = client[kRunningIdx];
+	  }
+	}
+
 	function onHttp2SessionGoAway (errorCode) {
 	  // TODO(mcollina): Verify if GOAWAY implements the spec correctly:
 	  // https://datatracker.ietf.org/doc/html/rfc7540#section-6.8
@@ -12086,7 +12221,9 @@ function requireClientH2 () {
 	  if (client[kRunningIdx] < client[kQueue].length) {
 	    const request = client[kQueue][client[kRunningIdx]];
 	    client[kQueue][client[kRunningIdx]++] = null;
-	    util.errorRequest(client, request, err);
+	    if (request != null) {
+	      util.errorRequest(client, request, err);
+	    }
 	    client[kPendingIdx] = client[kRunningIdx];
 	  }
 
@@ -12119,7 +12256,9 @@ function requireClientH2 () {
 	    const requests = client[kQueue].splice(client[kRunningIdx]);
 	    for (let i = 0; i < requests.length; i++) {
 	      const request = requests[i];
-	      util.errorRequest(client, request, err);
+	      if (request != null) {
+	        util.errorRequest(client, request, err);
+	      }
 	    }
 	  }
 	}
@@ -12167,7 +12306,10 @@ function requireClientH2 () {
 	}
 
 	function writeH2 (client, request) {
-	  const requestTimeout = request.bodyTimeout ?? client[kBodyTimeout];
+	  // Time to the response headers, then time between body chunks. Using
+	  // bodyTimeout for both made headersTimeout a no-op over HTTP/2.
+	  const headersTimeout = request.headersTimeout ?? client[kHeadersTimeout];
+	  const bodyTimeout = request.bodyTimeout ?? client[kBodyTimeout];
 	  const session = client[kHTTP2Session];
 	  const { method, path, host, upgrade, expectContinue, signal, protocol, headers: reqHeaders } = request;
 	  let { body } = request;
@@ -12234,6 +12376,7 @@ function requireClientH2 () {
 
 	      // We move the running index to the next request
 	      client[kOnError](err);
+	      completeRequest(client, request);
 	      client[kResume]();
 	    }
 
@@ -12288,7 +12431,7 @@ function requireClientH2 () {
 	        request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 
 	        ++session[kOpenStreams];
-	        client[kQueue][client[kRunningIdx]++] = null;
+	        completeRequest(client, request);
 	      });
 
 	      stream.on('error', () => {
@@ -12305,7 +12448,7 @@ function requireClientH2 () {
 	        if (session[kOpenStreams] === 0) session.unref();
 	      });
 
-	      stream.setTimeout(requestTimeout);
+	      stream.setTimeout(headersTimeout);
 	      return true
 	    }
 
@@ -12321,13 +12464,14 @@ function requireClientH2 () {
 
 	      request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 	      ++session[kOpenStreams];
-	      client[kQueue][client[kRunningIdx]++] = null;
+	      completeRequest(client, request);
 	    });
+	    stream.on('error', abort);
 	    stream.once('close', () => {
 	      session[kOpenStreams] -= 1;
 	      if (session[kOpenStreams] === 0) session.unref();
 	    });
-	    stream.setTimeout(requestTimeout);
+	    stream.setTimeout(headersTimeout);
 
 	    return true
 	  }
@@ -12428,7 +12572,7 @@ function requireClientH2 () {
 
 	  // Increment counter as we have new streams open
 	  ++session[kOpenStreams];
-	  stream.setTimeout(requestTimeout);
+	  stream.setTimeout(headersTimeout);
 
 	  // Track whether we received a response (headers)
 	  let responseReceived = false;
@@ -12437,6 +12581,7 @@ function requireClientH2 () {
 	    const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
 	    request.onResponseStarted();
 	    responseReceived = true;
+	    stream.setTimeout(bodyTimeout);
 
 	    // Due to the stream nature, it is possible we face a race condition
 	    // where the stream has been assigned, but the request has been aborted
@@ -12471,14 +12616,13 @@ function requireClientH2 () {
 	        request.onComplete({});
 	      }
 
-	      client[kQueue][client[kRunningIdx]++] = null;
+	      completeRequest(client, request);
 	      client[kResume]();
 	    } else {
 	      // Stream ended without receiving a response - this is an error
 	      // (e.g., server destroyed the stream before sending headers)
 	      abort(new InformationalError('HTTP/2: stream half-closed (remote)'));
-	      client[kQueue][client[kRunningIdx]++] = null;
-	      client[kPendingIdx] = client[kRunningIdx];
+	      completeRequest(client, request, true);
 	      client[kResume]();
 	    }
 	  });
@@ -12488,6 +12632,14 @@ function requireClientH2 () {
 	    session[kOpenStreams] -= 1;
 	    if (session[kOpenStreams] === 0) {
 	      session.unref();
+	    }
+
+	    // A stream can close without ever emitting 'end' or 'error': a peer's
+	    // RST_STREAM(CANCEL) received before the response is reported by Node as a
+	    // bare 'close', and destroying the stream unenrolls its timeout, so no
+	    // 'timeout' follows either. Nothing else would ever settle this request.
+	    if (!request.aborted && !request.completed) {
+	      abort(new InformationalError('HTTP/2: stream closed before the response was complete'));
 	    }
 	  });
 
@@ -12506,7 +12658,9 @@ function requireClientH2 () {
 	  });
 
 	  stream.on('timeout', () => {
-	    const err = new InformationalError(`HTTP/2: "stream timeout after ${requestTimeout}"`);
+	    const err = responseReceived
+	      ? new BodyTimeoutError(`HTTP/2: "body timeout after ${bodyTimeout}"`)
+	      : new HeadersTimeoutError(`HTTP/2: "headers timeout after ${headersTimeout}"`);
 	    stream.removeAllListeners('data');
 	    session[kOpenStreams] -= 1;
 
@@ -13126,7 +13280,9 @@ function requireClient () {
 	      const requests = this[kQueue].splice(this[kPendingIdx]);
 	      for (let i = 0; i < requests.length; i++) {
 	        const request = requests[i];
-	        util.errorRequest(this, request, err);
+	        if (request != null) {
+	          util.errorRequest(this, request, err);
+	        }
 	      }
 
 	      const callback = () => {
@@ -13165,7 +13321,9 @@ function requireClient () {
 
 	    for (let i = 0; i < requests.length; i++) {
 	      const request = requests[i];
-	      util.errorRequest(client, request, err);
+	      if (request != null) {
+	        util.errorRequest(client, request, err);
+	      }
 	    }
 	    assert(client[kSize] === 0);
 	  }
@@ -13964,14 +14122,16 @@ function requireBalancedPool () {
 	}
 
 	class BalancedPool extends PoolBase {
-	  constructor (upstreams = [], { factory = defaultFactory, ...opts } = {}) {
+	  constructor (upstreams = [], { factory = defaultFactory, connect, tls, ...opts } = {}) {
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
 
 	    super(opts);
 
-	    this[kOptions] = { ...util.deepClone(opts) };
+	    if (connect && typeof connect !== 'function') connect = { ...connect };
+	    if (tls && typeof tls !== 'function') tls = { ...tls };
+	    this[kOptions] = { ...util.deepClone(opts), connect, tls };
 	    this[kOptions].interceptors = opts.interceptors
 	      ? { ...opts.interceptors }
 	      : undefined;
@@ -15950,8 +16110,16 @@ function requireRetryHandler () {
 	    if (this.retryOpts.throwOnError) {
 	      // Preserve old behavior for status codes that are not eligible for retry
 	      if (this.retryOpts.statusCodes.includes(statusCode) === false) {
-	        this.headersSent = true;
-	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        if (this.headersSent) {
+	          // The downstream handler already received the response from an
+	          // earlier attempt. Forwarding this response would replace the
+	          // downstream body and leave the original body pending forever.
+	          this.handler.onResponseError?.(controller, err);
+	        } else {
+	          this.headersSent = true;
+	          this.checkpointResponseEnd(headers);
+	          this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        }
 	      } else {
 	        this.error = err;
 	      }
@@ -15961,14 +16129,23 @@ function requireRetryHandler () {
 
 	    if (isDisturbed(this.opts.body)) {
 	      this.headersSent = true;
+	      this.checkpointResponseEnd(headers);
 	      this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
 	      return
 	    }
 
 	    function shouldRetry (passedErr) {
 	      if (passedErr) {
-	        this.headersSent = true;
-	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        if (this.headersSent) {
+	          // The downstream handler already received the response from an
+	          // earlier attempt. Forwarding this response would replace the
+	          // downstream body and leave the original body pending forever.
+	          this.handler.onResponseError?.(controller, passedErr);
+	        } else {
+	          this.headersSent = true;
+	          this.checkpointResponseEnd(headers);
+	          this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        }
 	        controller.resume();
 	        return
 	      }
@@ -15986,6 +16163,20 @@ function requireRetryHandler () {
 	      },
 	      shouldRetry.bind(this)
 	    );
+	  }
+
+	  checkpointResponseEnd (headers) {
+	    if (this.end == null && this.opts.method !== 'HEAD') {
+	      const contentLength = headers['content-length'];
+	      this.end = contentLength != null ? Number(contentLength) - 1 : null;
+
+	      assert(
+	        this.end == null || Number.isFinite(this.end),
+	        'invalid content-length'
+	      );
+
+	      this.resume = this.end != null;
+	    }
 	  }
 
 	  onRequestStart (controller, context) {
@@ -16108,8 +16299,12 @@ function requireRetryHandler () {
 
 	      const { start, size, end = size ? size - 1 : null } = contentRange;
 
-	      assert(this.start === start, 'content-range mismatch');
-	      assert(this.end == null || this.end === end, 'content-range mismatch');
+	      if (this.start !== start || (this.end != null && this.end !== end)) {
+	        throw new RequestRetryError('Content-Range mismatch', statusCode, {
+	          headers,
+	          data: { count: this.retryCount }
+	        })
+	      }
 
 	      return
 	    }
@@ -16234,7 +16429,7 @@ function requireRetryHandler () {
 	  }
 
 	  onResponseError (controller, err) {
-	    if (controller?.aborted || isDisturbed(this.opts.body)) {
+	    if (controller?.aborted || isDisturbed(this.opts.body) || (this.headersSent && !this.resume)) {
 	      this.handler.onResponseError?.(controller, err);
 	      return
 	    }
@@ -21154,7 +21349,6 @@ function requireDump () {
 	  #maxSize = 1024 * 1024
 	  #dumped = false
 	  #size = 0
-	  #controller = null
 	  aborted = false
 	  reason = false
 
@@ -21176,7 +21370,6 @@ function requireDump () {
 
 	  onRequestStart (controller, context) {
 	    controller.abort = this.#abort.bind(this);
-	    this.#controller = controller;
 
 	    return super.onRequestStart(controller, context)
 	  }
@@ -21200,43 +21393,32 @@ function requireDump () {
 	  }
 
 	  onResponseError (controller, err) {
-	    if (this.#dumped) {
-	      return
-	    }
-
-	    // On network errors before connect, controller will be null
-	    err = this.#controller?.reason ?? err;
-
-	    super.onResponseError(controller, err);
+	    super.onResponseError(controller, this.aborted === true ? this.reason : err);
 	  }
 
 	  onResponseData (controller, chunk) {
 	    this.#size = this.#size + chunk.length;
 
-	    if (this.#size >= this.#maxSize) {
-	      this.#dumped = true;
+	    if (this.#size > this.#maxSize) {
+	      throw new RequestAbortedError(
+	        `Response size (${this.#size}) larger than maxSize (${this.#maxSize})`
+	      )
+	    }
 
-	      if (this.aborted === true) {
-	        super.onResponseError(controller, this.reason);
-	      } else {
-	        super.onResponseEnd(controller, {});
-	      }
+	    if (this.#size === this.#maxSize) {
+	      this.#dumped = true;
 	    }
 
 	    return true
 	  }
 
 	  onResponseEnd (controller, trailers) {
-	    if (this.#dumped) {
-	      return
-	    }
-
-	    if (this.#controller.aborted === true) {
+	    if (this.aborted === true) {
 	      super.onResponseError(controller, this.reason);
 	      return
 	    }
 
-	    super.onResponseEnd(controller, trailers);
+	    super.onResponseEnd(controller, this.#dumped ? {} : trailers);
 	  }
 	}
 
@@ -23418,6 +23600,13 @@ function requireCacheHandler () {
 	    }
 
 	    const cacheControlHeader = resHeaders['cache-control'];
+	    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
+
+	    if (revalidationResponseDisallowsCachedReuse(this.#cacheType, resHeaders, cacheControlDirectives)) {
+	      deleteCachedValue(this.#store, this.#cacheKey);
+	      return downstreamOnHeaders()
+	    }
+
 	    const heuristicallyCacheable = resHeaders['last-modified'] && arrayIncludes(HEURISTICALLY_CACHEABLE_STATUS_CODES, statusCode);
 	    if (
 	      !cacheControlHeader &&
@@ -23434,8 +23623,7 @@ function requireCacheHandler () {
 	      return downstreamOnHeaders()
 	    }
 
-	    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
-	    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
+	    if (!canCacheResponse(this.#cacheType, this.#cacheKey.method, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
 	      if (statusCode === 304 && (cacheControlHeader || revalidationResponseDisallowsCachedReuse(this.#cacheType, resHeaders, cacheControlDirectives))) {
 	        deleteCachedValue(this.#store, this.#cacheKey);
 	      }
@@ -23676,7 +23864,10 @@ function requireCacheHandler () {
 	 */
 	function revalidationResponseDisallowsCachedReuse (cacheType, resHeaders, cacheControlDirectives) {
 	  return cacheControlDirectives['no-store'] === true ||
-	    (cacheType === 'shared' && cacheControlDirectives.private === true) ||
+	    (cacheType === 'shared' && (
+	      cacheControlDirectives.private === true ||
+	      Object.hasOwn(resHeaders, 'set-cookie')
+	    )) ||
 	    (resHeaders.vary ? isInvalidOrWildcardVaryHeader(resHeaders.vary) : false)
 	}
 
@@ -23684,12 +23875,16 @@ function requireCacheHandler () {
 	 * @see https://www.rfc-editor.org/rfc/rfc9111.html#name-storing-responses-to-authen
 	 *
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheOptions['type']} cacheType
+	 * @param {string} method
 	 * @param {number} statusCode
 	 * @param {import('../../types/header.d.ts').IncomingHttpHeaders} resHeaders
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives} cacheControlDirectives
 	 * @param {import('../../types/header.d.ts').IncomingHttpHeaders} [reqHeaders]
 	 */
-	function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
+	function canCacheResponse (cacheType, method, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
+	  if (!arrayIncludes(util.safeHTTPMethods, method)) {
+	    return false
+	  }
 	  // Status code must be final and understood.
 	  if (statusCode < 200 || arrayIncludes(NOT_UNDERSTOOD_STATUS_CODES, statusCode)) {
 	    return false
@@ -23710,7 +23905,10 @@ function requireCacheHandler () {
 	    return false
 	  }
 
-	  if (cacheType === 'shared' && cacheControlDirectives.private === true) {
+	  if (cacheType === 'shared' && (
+	    cacheControlDirectives.private === true ||
+	    Object.hasOwn(resHeaders, 'set-cookie')
+	  )) {
 	    return false
 	  }
 
@@ -24515,7 +24713,10 @@ function requireCache$1 () {
 	 * @returns {boolean}
 	 */
 	function revalidationResponseDisallowsCachedReuse (cacheType, headers) {
-	  if (headers.vary && isInvalidOrWildcardVaryHeader(headers.vary)) {
+	  if (
+	    (headers.vary && isInvalidOrWildcardVaryHeader(headers.vary)) ||
+	    (cacheType === 'shared' && Object.hasOwn(headers, 'set-cookie'))
+	  ) {
 	    return true
 	  }
 
@@ -24774,6 +24975,17 @@ function requireCache$1 () {
 	    return handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl)
 	  }
 
+	  // Shared stores may outlive the Undici version that wrote them. Do not
+	  // re-serve a Set-Cookie header from an existing shared-cache entry.
+	  if (globalOpts.type === 'shared' && Object.hasOwn(result.headers, 'set-cookie')) {
+	    if (util.isStream(result.body)) {
+	      result.body.on('error', nop).destroy();
+	    }
+
+	    deleteCachedValue(globalOpts.store, cacheKey);
+	    return handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl)
+	  }
+
 	  const now = Date.now();
 	  if (now > result.deleteAt) {
 	    // Response is expired, cache store shouldn't have given this to us
@@ -24972,6 +25184,11 @@ function requireCache$1 () {
 	       * @type {import('../../types/cache-interceptor.d.ts').default.CacheKey}
 	       */
 	      const cacheKey = makeCacheKey(opts);
+
+	      if (!arrayIncludes(util.safeHTTPMethods, opts.method)) {
+	        return dispatch(opts, new CacheHandler(globalOpts, cacheKey, handler))
+	      }
+
 	      const result = store.get(cacheKey);
 
 	      if (result && typeof result.then === 'function') {
@@ -25009,7 +25226,8 @@ function requireDecompress () {
 	hasRequiredDecompress = 1;
 
 	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = __require$c();
-	const { pipeline } = __require$j();
+	const { pipeline, Transform: TransformStream } = __require$j();
+	const { InvalidArgumentError, ResponseExceededMaxSizeError } = requireErrors();
 	const DecoratorHandler = requireDecoratorHandler();
 	const { runtimeFeatures } = requireRuntimeFeatures();
 
@@ -25029,6 +25247,31 @@ function requireDecompress () {
 	};
 
 	const defaultSkipStatusCodes = /** @type {const} */ ([204, 304]);
+	const defaultMaxSize = 64 * 1024 * 1024;
+
+	/**
+	 * Limits the output of one stage in a decompression chain.
+	 * @param {number} maxSize - Maximum output size in bytes
+	 * @returns {Transform}
+	 */
+	function createMaxSizeLimiter (maxSize) {
+	  let size = 0;
+
+	  return new TransformStream({
+	    transform (chunk, _encoding, callback) {
+	      const decompressedSize = size + chunk.length;
+	      if (decompressedSize > maxSize) {
+	        callback(new ResponseExceededMaxSizeError(
+	          `Decompressed response size (${decompressedSize}) exceeded maxSize (${maxSize})`
+	        ));
+	        return
+	      }
+
+	      size = decompressedSize;
+	      callback(null, chunk);
+	    }
+	  })
+	}
 
 	let warningEmitted = /** @type {boolean} */ (false);
 
@@ -25036,20 +25279,36 @@ function requireDecompress () {
 	 * @typedef {Object} DecompressHandlerOptions
 	 * @property {number[]|Readonly<number[]>} [skipStatusCodes=[204, 304]] - List of status codes to skip decompression for
 	 * @property {boolean} [skipErrorResponses] - Whether to skip decompression for error responses (status codes >= 400)
+	 * @property {number} [maxSize=67108864] - Maximum decompressed response size in bytes
 	 */
 
 	class DecompressHandler extends DecoratorHandler {
 	  /** @type {Transform[]} */
 	  #decompressors = []
+	  /** @type {Record<string, string | string[]> | undefined} */
+	  #trailers
 	  /** @type {Readonly<number[]>} */
 	  #skipStatusCodes
 	  /** @type {boolean} */
 	  #skipErrorResponses
+	  /** @type {number} */
+	  #maxSize
+	  /** @type {number} */
+	  #decompressedSize = 0
+	  /** @type {boolean} */
+	  #terminated = false
+	  /** @type {boolean} */
+	  #inputEnded = false
 
-	  constructor (handler, { skipStatusCodes = defaultSkipStatusCodes, skipErrorResponses = true } = {}) {
+	  constructor (handler, { skipStatusCodes = defaultSkipStatusCodes, skipErrorResponses = true, maxSize = defaultMaxSize } = {}) {
+	    if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+	      throw new InvalidArgumentError('maxSize must be a positive integer')
+	    }
+
 	    super(handler);
 	    this.#skipStatusCodes = skipStatusCodes;
 	    this.#skipErrorResponses = skipErrorResponses;
+	    this.#maxSize = maxSize;
 	  }
 
 	  /**
@@ -25069,7 +25328,7 @@ function requireDecompress () {
 	   * Creates a chain of decompressors for multiple content encodings
 	   *
 	   * @param {string} encodings - Comma-separated list of content encodings
-	   * @returns {Array<DecompressorStream>} - Array of decompressor streams
+	   * @returns {Array<Transform>} - Array of decompressor and limiting streams
 	   * @throws {Error} - If the number of content-encodings exceeds the maximum allowed
 	   */
 	  #createDecompressionChain (encodings) {
@@ -25097,7 +25356,40 @@ function requireDecompress () {
 	      decompressors.push(supportedEncodings[encoding]());
 	    }
 
-	    return decompressors
+	    if (decompressors.length < 2) {
+	      return decompressors
+	    }
+
+	    /** @type {Transform[]} */
+	    const streams = [];
+	    for (let i = 0; i < decompressors.length; i++) {
+	      streams.push(decompressors[i]);
+	      if (i < decompressors.length - 1) {
+	        streams.push(createMaxSizeLimiter(this.#maxSize));
+	      }
+	    }
+
+	    return streams
+	  }
+
+	  /**
+	   * Stops decompression and reports an error.
+	   * @param {Controller} controller - The controller to coordinate with
+	   * @param {Error} error - The decompression error
+	   * @returns {void}
+	   */
+	  #fail (controller, error) {
+	    if (this.#terminated) {
+	      return
+	    }
+
+	    if (this.#inputEnded) {
+	      // The request is already marked complete once the compressed input ends,
+	      // so controller.abort() can no longer propagate decoder flush errors.
+	      this.onResponseError(controller, error);
+	    } else {
+	      controller.abort(error);
+	    }
 	  }
 
 	  /**
@@ -25108,8 +25400,21 @@ function requireDecompress () {
 	   */
 	  #setupDecompressorEvents (decompressor, controller) {
 	    decompressor.on('readable', () => {
+	      if (this.#terminated) {
+	        return
+	      }
+
 	      let chunk;
 	      while ((chunk = decompressor.read()) !== null) {
+	        const decompressedSize = this.#decompressedSize + chunk.length;
+	        if (decompressedSize > this.#maxSize) {
+	          this.#fail(controller, new ResponseExceededMaxSizeError(
+	            `Decompressed response size (${decompressedSize}) exceeded maxSize (${this.#maxSize})`
+	          ));
+	          return
+	        }
+
+	        this.#decompressedSize = decompressedSize;
 	        const result = super.onResponseData(controller, chunk);
 	        if (result === false) {
 	          break
@@ -25118,7 +25423,7 @@ function requireDecompress () {
 	    });
 
 	    decompressor.on('error', (error) => {
-	      super.onResponseError(controller, error);
+	      this.#fail(controller, error);
 	    });
 	  }
 
@@ -25132,7 +25437,13 @@ function requireDecompress () {
 	    this.#setupDecompressorEvents(decompressor, controller);
 
 	    decompressor.on('end', () => {
-	      super.onResponseEnd(controller, {});
+	      if (this.#terminated) {
+	        return
+	      }
+
+	      this.#terminated = true;
+	      this.#cleanupDecompressors();
+	      super.onResponseEnd(controller, this.#trailers);
 	    });
 	  }
 
@@ -25146,11 +25457,18 @@ function requireDecompress () {
 	    this.#setupDecompressorEvents(lastDecompressor, controller);
 
 	    pipeline(this.#decompressors, (err) => {
-	      if (err) {
-	        super.onResponseError(controller, err);
+	      if (this.#terminated) {
 	        return
 	      }
-	      super.onResponseEnd(controller, {});
+
+	      if (err) {
+	        this.#fail(controller, err);
+	        return
+	      }
+
+	      this.#terminated = true;
+	      this.#cleanupDecompressors();
+	      super.onResponseEnd(controller, this.#trailers);
 	    });
 	  }
 
@@ -25189,6 +25507,33 @@ function requireDecompress () {
 	    // Remove compression headers since we're decompressing
 	    const { 'content-encoding': _, 'content-length': __, ...newHeaders } = headers;
 
+	    if (controller?.rawHeaders) {
+	      const rawHeaders = controller.rawHeaders;
+
+	      if (Array.isArray(rawHeaders)) {
+	        const filteredHeaders = [];
+	        for (let i = 0; i < rawHeaders.length; i += 2) {
+	          const headerName = rawHeaders[i];
+	          const name = Buffer.isBuffer(headerName) ? headerName.toString('latin1') : `${headerName}`;
+	          const lowerName = name.toLowerCase();
+
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            continue
+	          }
+
+	          filteredHeaders.push(rawHeaders[i], rawHeaders[i + 1]);
+	        }
+	        rawHeaders.splice(0, rawHeaders.length, ...filteredHeaders);
+	      } else if (typeof rawHeaders === 'object') {
+	        for (const name of Object.keys(rawHeaders)) {
+	          const lowerName = name.toLowerCase();
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            delete rawHeaders[name];
+	          }
+	        }
+	      }
+	    }
+
 	    if (this.#decompressors.length === 1) {
 	      this.#setupSingleDecompressor(controller);
 	    } else {
@@ -25218,8 +25563,9 @@ function requireDecompress () {
 	   */
 	  onResponseEnd (controller, trailers) {
 	    if (this.#decompressors.length > 0) {
+	      this.#inputEnded = true;
+	      this.#trailers = trailers;
 	      this.#decompressors[0].end();
-	      this.#cleanupDecompressors();
 	      return
 	    }
 	    super.onResponseEnd(controller, trailers);
@@ -25231,12 +25577,15 @@ function requireDecompress () {
 	   * @returns {void}
 	   */
 	  onResponseError (controller, err) {
-	    if (this.#decompressors.length > 0) {
-	      for (const decompressor of this.#decompressors) {
-	        decompressor.destroy(err);
-	      }
-	      this.#cleanupDecompressors();
+	    if (this.#terminated) {
+	      return
 	    }
+
+	    this.#terminated = true;
+	    for (const decompressor of this.#decompressors) {
+	      decompressor.destroy();
+	    }
+	    this.#cleanupDecompressors();
 	    super.onResponseError(controller, err);
 	  }
 	}
@@ -34681,7 +35030,7 @@ function requireConnection () {
 	        // is specified, the server needs to include the same field and one of
 	        // the selected subprotocol values in its response for the connection to
 	        // be established.
-	        if (!requestProtocols.includes(secProtocol)) {
+	        if (requestProtocols === null || !requestProtocols.includes(secProtocol)) {
 	          failWebsocketConnection(handler, 1002, 'Protocol was not set in the opening handshake.');
 	          return
 	        }
@@ -34879,7 +35228,12 @@ function requirePermessageDeflate () {
 
 	        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
 	          callback(new MessageSizeExceededError());
+	          // The inflater may still hold buffered input that can emit a late
+	          // zlib error. Remove the data listener, then deterministically stop
+	          // the stream so a subsequent 'error' cannot fire without a listener
+	          // (which would terminate the process as an unhandled error event).
 	          this.#inflate.removeAllListeners();
+	          this.#inflate.destroy();
 	          this.#inflate = null;
 	          return
 	        }
@@ -36468,9 +36822,9 @@ function requireWebsocketstream () {
 	  /** @type {ReadableStreamDefaultController} */
 	  #readableStreamController
 
-	  // Each WebSocketStream object has an associated writable stream , which is a WritableStream .
-	  /** @type {WritableStream} */
-	  #writableStream
+	  // Retain the controller so the writable stream can be errored while locked.
+	  /** @type {WritableStreamDefaultController} */
+	  #writableStreamController
 
 	  // Each WebSocketStream object has an associated boolean handshake aborted , which is initially false.
 	  #handshakeAborted = false
@@ -36734,6 +37088,9 @@ function requireWebsocketstream () {
 	    // 12. Let writable be a new WritableStream .
 	    // 13. Set up writable with writeAlgorithm , closeAlgorithm , and abortAlgorithm .
 	    const writable = new WritableStream({
+	      start: (controller) => {
+	        this.#writableStreamController = controller;
+	      },
 	      write: (chunk) => this.#write(chunk),
 	      close: () => closeWebSocketConnection(this.#handler, null, null),
 	      abort: (reason) => this.#closeUsingReason(reason)
@@ -36741,9 +37098,6 @@ function requireWebsocketstream () {
 
 	    // Set stream ’s readable stream to readable .
 	    this.#readableStream = readable;
-
-	    // Set stream ’s writable stream to writable .
-	    this.#writableStream = writable;
 
 	    // Resolve stream ’s opened promise with WebSocketOpenInfo «[ " extensions " → extensions , " protocol " → protocol , " readable " → readable , " writable " → writable ]».
 	    this.#openedPromise.resolve({
@@ -36830,9 +37184,7 @@ function requireWebsocketstream () {
 	      this.#readableStreamController.close();
 
 	      // 6.2. Error stream ’s writable stream with an " InvalidStateError " DOMException indicating that a closed WebSocketStream cannot be written to.
-	      if (!this.#writableStream.locked) {
-	        this.#writableStream.abort(new DOMException('A closed WebSocketStream cannot be written to', 'InvalidStateError'));
-	      }
+	      this.#writableStreamController.error(new DOMException('A closed WebSocketStream cannot be written to', 'InvalidStateError'));
 
 	      // 6.3. Resolve stream ’s closed promise with WebSocketCloseInfo «[ " closeCode " → code , " reason " → reason ]».
 	      this.#closedPromise.resolve({
@@ -36849,7 +37201,7 @@ function requireWebsocketstream () {
 	      this.#readableStreamController?.error(error);
 
 	      // 7.3. Error stream ’s writable stream with error .
-	      this.#writableStream?.abort(error);
+	      this.#writableStreamController?.error(error);
 
 	      // 7.4. Reject stream ’s closed promise with error .
 	      this.#closedPromise.reject(error);
@@ -37000,6 +37352,49 @@ function requireEventsourceStream () {
 	 */
 	const SPACE = 0x20;
 
+	const DATA = Buffer.from('data');
+	const EVENT = Buffer.from('event');
+	const ID = Buffer.from('id');
+	const RETRY = Buffer.from('retry');
+
+	function isASCIINumberBytes (buffer, start) {
+	  if (start >= buffer.length) {
+	    return false
+	  }
+
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] < 0x30 || buffer[i] > 0x39) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isValidLastEventIdBytes (buffer, start) {
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] === 0x00) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isFieldName (line, length, field) {
+	  if (length !== field.length) {
+	    return false
+	  }
+
+	  for (let i = 0; i < length; i++) {
+	    if (line[i] !== field[i]) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
 	/**
 	 * @typedef {object} EventSourceStreamEvent
 	 * @type {object}
@@ -37040,11 +37435,14 @@ function requireEventsourceStream () {
 	  eventEndCheck = false
 
 	  /**
-	   * @type {Buffer|null}
+	   * @type {Buffer[]}
 	   */
-	  buffer = null
+	  chunks = []
 
+	  chunkIndex = 0
 	  pos = 0
+	  lineChunkIndex = 0
+	  linePos = 0
 
 	  event = {
 	    data: undefined,
@@ -37084,92 +37482,20 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    // Cache the chunk in the buffer, as the data might not be complete while
-	    // processing it
-	    // TODO: Investigate if there is a more performant way to handle
-	    // incoming chunks
-	    // see: https://github.com/nodejs/undici/issues/2630
-	    if (this.buffer) {
-	      this.buffer = Buffer.concat([this.buffer, chunk]);
-	    } else {
-	      this.buffer = chunk;
-	    }
+	    this.chunks.push(chunk);
 
 	    // Strip leading byte-order-mark if we opened the stream and started
 	    // the processing of the incoming data
 	    if (this.checkBOM) {
-	      switch (this.buffer.length) {
-	        case 1:
-	          // Check if the first byte is the same as the first byte of the BOM
-	          if (this.buffer[0] === BOM[0]) {
-	            // If it is, we need to wait for more data
-	            callback();
-	            return
-	          }
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-
-	          // The buffer only contains one byte so we need to wait for more data
-	          callback();
-	          return
-	        case 2:
-	          // Check if the first two bytes are the same as the first two bytes
-	          // of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1]
-	          ) {
-	            // If it is, we need to wait for more data, because the third byte
-	            // is needed to determine if it is the BOM or not
-	            callback();
-	            return
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-	          break
-	        case 3:
-	          // Check if the first three bytes are the same as the first three
-	          // bytes of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // If it is, we can drop the buffered data, as it is only the BOM
-	            this.buffer = Buffer.alloc(0);
-	            // Set the checkBOM flag to false as we don't need to check for the
-	            // BOM anymore
-	            this.checkBOM = false;
-
-	            // Await more data
-	            callback();
-	            return
-	          }
-	          // If it is not the BOM, we can start processing the data
-	          this.checkBOM = false;
-	          break
-	        default:
-	          // The buffer is longer than 3 bytes, so we can drop the BOM if it is
-	          // present
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // Remove the BOM from the buffer
-	            this.buffer = this.buffer.subarray(3);
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          this.checkBOM = false;
-	          break
+	      if (this.handleBOM()) {
+	        callback();
+	        return
 	      }
 	    }
 
-	    while (this.pos < this.buffer.length) {
+	    while (this.hasCurrentByte()) {
+	      const byte = this.currentByte();
+
 	      // If the previous line ended with an end-of-line, we need to check
 	      // if the next character is also an end-of-line.
 	      if (this.eventEndCheck) {
@@ -37182,10 +37508,9 @@ function requireEventsourceStream () {
 	        if (this.crlfCheck) {
 	          // If the current character is a line feed, we can remove it
 	          // from the buffer and reset the crlfCheck flag
-	          if (this.buffer[this.pos] === LF) {
-	            this.buffer = this.buffer.subarray(this.pos + 1);
-	            this.pos = 0;
+	          if (byte === LF) {
 	            this.crlfCheck = false;
+	            this.consumeCurrentByte();
 
 	            // It is possible that the line feed is not the end of the
 	            // event. We need to check if the next character is an
@@ -37201,19 +37526,17 @@ function requireEventsourceStream () {
 	          this.crlfCheck = false;
 	        }
 
-	        if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	        if (byte === LF || byte === CR) {
 	          // If the current character is a carriage return, we need to
 	          // set the crlfCheck flag to true, as we need to check if the
 	          // next character is a line feed so we can remove it from the
 	          // buffer
-	          if (this.buffer[this.pos] === CR) {
+	          if (byte === CR) {
 	            this.crlfCheck = true;
 	          }
 
-	          this.buffer = this.buffer.subarray(this.pos + 1);
-	          this.pos = 0;
-	          if (
-	            this.event.data !== undefined || this.event.event || this.event.id !== undefined || this.event.retry) {
+	          this.consumeCurrentByte();
+	          if (this.hasPendingEvent()) {
 	            this.processEvent(this.event);
 	          }
 	          this.clearEvent();
@@ -37227,22 +37550,18 @@ function requireEventsourceStream () {
 
 	      // If the current character is an end-of-line, we can process the
 	      // line
-	      if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	      if (byte === LF || byte === CR) {
 	        // If the current character is a carriage return, we need to
 	        // set the crlfCheck flag to true, as we need to check if the
 	        // next character is a line feed
-	        if (this.buffer[this.pos] === CR) {
+	        if (byte === CR) {
 	          this.crlfCheck = true;
 	        }
 
 	        // In any case, we can process the line as we reached an
 	        // end-of-line character
-	        this.parseLine(this.buffer.subarray(0, this.pos), this.event);
-
-	        // Remove the processed line from the buffer
-	        this.buffer = this.buffer.subarray(this.pos + 1);
-	        // Reset the position as we removed the processed line from the buffer
-	        this.pos = 0;
+	        this.parseLine(this.readLine(), this.event);
+	        this.consumeCurrentByte();
 	        // A line was processed and this could be the end of the event. We need
 	        // to check if the next line is empty to determine if the event is
 	        // finished.
@@ -37250,7 +37569,7 @@ function requireEventsourceStream () {
 	        continue
 	      }
 
-	      this.pos++;
+	      this.advanceCursor();
 	    }
 
 	    callback();
@@ -37275,64 +37594,53 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    let field = '';
-	    let value = '';
+	    let fieldLength = line.length;
+	    let valueStart = line.length;
 
 	    // If the line contains a U+003A COLON character (:)
 	    if (colonPosition !== -1) {
-	      // Collect the characters on the line before the first U+003A COLON
-	      // character (:), and let field be that string.
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // field
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      field = line.subarray(0, colonPosition).toString('utf8');
+	      fieldLength = colonPosition;
 
 	      // Collect the characters on the line after the first U+003A COLON
 	      // character (:), and let value be that string.
 	      // If value starts with a U+0020 SPACE character, remove it from value.
-	      let valueStart = colonPosition + 1;
+	      valueStart = colonPosition + 1;
 	      if (line[valueStart] === SPACE) {
 	        ++valueStart;
 	      }
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // value
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      value = line.subarray(valueStart).toString('utf8');
-
-	      // Otherwise, the string is not empty but does not contain a U+003A COLON
-	      // character (:)
-	    } else {
-	      // Process the field using the steps described below, using the whole
-	      // line as the field name, and the empty string as the field value.
-	      field = line.toString('utf8');
-	      value = '';
 	    }
 
-	    // Modify the event with the field name and value. The value is also
-	    // decoded as UTF-8
-	    switch (field) {
-	      case 'data':
-	        if (event[field] === undefined) {
-	          event[field] = value;
-	        } else {
-	          event[field] += `\n${value}`;
-	        }
-	        break
-	      case 'retry':
-	        if (isASCIINumber(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'id':
-	        if (isValidLastEventId(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'event':
-	        if (value.length > 0) {
-	          event[field] = value;
-	        }
-	        break
+	    if (isFieldName(line, fieldLength, DATA)) {
+	      const value = line.toString('utf8', valueStart);
+
+	      if (event.data === undefined) {
+	        event.data = value;
+	      } else {
+	        event.data += `\n${value}`;
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, RETRY)) {
+	      if (isASCIINumberBytes(line, valueStart)) {
+	        event.retry = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, ID)) {
+	      if (isValidLastEventIdBytes(line, valueStart)) {
+	        event.id = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, EVENT)) {
+	      const value = line.toString('utf8', valueStart);
+
+	      if (value.length > 0) {
+	        event.event = value;
+	      }
 	    }
 	  }
 
@@ -37362,12 +37670,151 @@ function requireEventsourceStream () {
 	  }
 
 	  clearEvent () {
-	    this.event = {
-	      data: undefined,
-	      event: undefined,
-	      id: undefined,
-	      retry: undefined
-	    };
+	    this.event.data = undefined;
+	    this.event.event = undefined;
+	    this.event.id = undefined;
+	    this.event.retry = undefined;
+	  }
+
+	  hasPendingEvent () {
+	    return this.event.data !== undefined ||
+	      this.event.event !== undefined ||
+	      this.event.id !== undefined ||
+	      this.event.retry !== undefined
+	  }
+
+	  hasCurrentByte () {
+	    return this.chunkIndex < this.chunks.length &&
+	      this.pos < this.chunks[this.chunkIndex].length
+	  }
+
+	  currentByte () {
+	    return this.chunks[this.chunkIndex][this.pos]
+	  }
+
+	  consumeCurrentByte () {
+	    this.advanceCursor();
+	    this.syncLineStartToCursor();
+	  }
+
+	  advanceCursor () {
+	    this.pos++;
+
+	    while (this.chunkIndex < this.chunks.length && this.pos >= this.chunks[this.chunkIndex].length) {
+	      this.chunkIndex++;
+	      this.pos = 0;
+	    }
+	  }
+
+	  syncLineStartToCursor () {
+	    this.lineChunkIndex = this.chunkIndex;
+	    this.linePos = this.pos;
+	    this.dropConsumedChunks();
+	  }
+
+	  dropConsumedChunks () {
+	    while (this.lineChunkIndex > 0) {
+	      this.chunks.shift();
+	      this.lineChunkIndex--;
+	      this.chunkIndex--;
+	    }
+
+	    if (this.chunkIndex === this.chunks.length) {
+	      this.chunks.length = 0;
+	      this.chunkIndex = 0;
+	      this.pos = 0;
+	      this.lineChunkIndex = 0;
+	      this.linePos = 0;
+	    }
+	  }
+
+	  readLine () {
+	    if (this.lineChunkIndex === this.chunkIndex) {
+	      return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos)
+	    }
+
+	    const chunks = [];
+	    let length = 0;
+
+	    for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+	      const chunk = this.chunks[i];
+	      const start = i === this.lineChunkIndex ? this.linePos : 0;
+	      const end = i === this.chunkIndex ? this.pos : chunk.length;
+	      const slice = chunk.subarray(start, end);
+	      length += slice.length;
+	      chunks.push(slice);
+	    }
+
+	    return Buffer.concat(chunks, length)
+	  }
+
+	  peekBufferedByte (offset) {
+	    let chunkIndex = this.lineChunkIndex;
+	    let pos = this.linePos;
+
+	    while (chunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[chunkIndex];
+	      const remaining = chunk.length - pos;
+
+	      if (offset < remaining) {
+	        return chunk[pos + offset]
+	      }
+
+	      offset -= remaining;
+	      chunkIndex++;
+	      pos = 0;
+	    }
+	  }
+
+	  discardLeadingBytes (count) {
+	    while (count > 0 && this.lineChunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[this.lineChunkIndex];
+	      const remaining = chunk.length - this.linePos;
+
+	      if (count < remaining) {
+	        this.linePos += count;
+	        count = 0;
+	      } else {
+	        count -= remaining;
+	        this.lineChunkIndex++;
+	        this.linePos = 0;
+	      }
+	    }
+
+	    this.chunkIndex = this.lineChunkIndex;
+	    this.pos = this.linePos;
+	    this.dropConsumedChunks();
+	  }
+
+	  handleBOM () {
+	    const first = this.peekBufferedByte(0);
+	    const second = this.peekBufferedByte(1);
+	    const third = this.peekBufferedByte(2);
+
+	    if (second === undefined) {
+	      if (first === BOM[0]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return true
+	    }
+
+	    if (third === undefined) {
+	      if (first === BOM[0] && second === BOM[1]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return false
+	    }
+
+	    if (first === BOM[0] && second === BOM[1] && third === BOM[2]) {
+	      this.discardLeadingBytes(3);
+	    }
+
+	    this.checkBOM = false;
+	    return !this.hasCurrentByte()
 	  }
 	}
 
@@ -38134,7 +38581,7 @@ function requireUndici () {
 var undiciExports = requireUndici();
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$4 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38143,7 +38590,7 @@ var undiciExports = requireUndici();
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var HttpCodes$1;
+var HttpCodes;
 (function (HttpCodes) {
     HttpCodes[HttpCodes["OK"] = 200] = "OK";
     HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
@@ -38172,28 +38619,645 @@ var HttpCodes$1;
     HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
     HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
     HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes$1 || (HttpCodes$1 = {}));
-var Headers$1;
+})(HttpCodes || (HttpCodes = {}));
+var Headers;
 (function (Headers) {
     Headers["Accept"] = "accept";
     Headers["ContentType"] = "content-type";
-})(Headers$1 || (Headers$1 = {}));
-var MediaTypes$1;
+})(Headers || (Headers = {}));
+var MediaTypes;
 (function (MediaTypes) {
     MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes$1 || (MediaTypes$1 = {}));
-[
-    HttpCodes$1.MovedPermanently,
-    HttpCodes$1.ResourceMoved,
-    HttpCodes$1.SeeOther,
-    HttpCodes$1.TemporaryRedirect,
-    HttpCodes$1.PermanentRedirect
+})(MediaTypes || (MediaTypes = {}));
+const HttpRedirectCodes = [
+    HttpCodes.MovedPermanently,
+    HttpCodes.ResourceMoved,
+    HttpCodes.SeeOther,
+    HttpCodes.TemporaryRedirect,
+    HttpCodes.PermanentRedirect
 ];
-[
-    HttpCodes$1.BadGateway,
-    HttpCodes$1.ServiceUnavailable,
-    HttpCodes$1.GatewayTimeout
+const HttpResponseRetryCodes = [
+    HttpCodes.BadGateway,
+    HttpCodes.ServiceUnavailable,
+    HttpCodes.GatewayTimeout
 ];
+const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
+const ExponentialBackoffCeiling = 10;
+const ExponentialBackoffTimeSlice = 5;
+class HttpClientError extends Error {
+    constructor(message, statusCode) {
+        super(message);
+        this.name = 'HttpClientError';
+        this.statusCode = statusCode;
+        Object.setPrototypeOf(this, HttpClientError.prototype);
+    }
+}
+class HttpClientResponse {
+    constructor(message) {
+        this.message = message;
+    }
+    readBody() {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$4(this, void 0, void 0, function* () {
+                let output = Buffer.alloc(0);
+                this.message.on('data', (chunk) => {
+                    output = Buffer.concat([output, chunk]);
+                });
+                this.message.on('end', () => {
+                    resolve(output.toString());
+                });
+            }));
+        });
+    }
+    readBodyBuffer() {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$4(this, void 0, void 0, function* () {
+                const chunks = [];
+                this.message.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+                this.message.on('end', () => {
+                    resolve(Buffer.concat(chunks));
+                });
+            }));
+        });
+    }
+}
+class HttpClient {
+    constructor(userAgent, handlers, requestOptions) {
+        this._ignoreSslError = false;
+        this._allowRedirects = true;
+        this._allowRedirectDowngrade = false;
+        this._maxRedirects = 50;
+        this._allowRetries = false;
+        this._maxRetries = 1;
+        this._keepAlive = false;
+        this._disposed = false;
+        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
+        this.handlers = handlers || [];
+        this.requestOptions = requestOptions;
+        if (requestOptions) {
+            if (requestOptions.ignoreSslError != null) {
+                this._ignoreSslError = requestOptions.ignoreSslError;
+            }
+            this._socketTimeout = requestOptions.socketTimeout;
+            if (requestOptions.allowRedirects != null) {
+                this._allowRedirects = requestOptions.allowRedirects;
+            }
+            if (requestOptions.allowRedirectDowngrade != null) {
+                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
+            }
+            if (requestOptions.maxRedirects != null) {
+                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
+            }
+            if (requestOptions.keepAlive != null) {
+                this._keepAlive = requestOptions.keepAlive;
+            }
+            if (requestOptions.allowRetries != null) {
+                this._allowRetries = requestOptions.allowRetries;
+            }
+            if (requestOptions.maxRetries != null) {
+                this._maxRetries = requestOptions.maxRetries;
+            }
+        }
+    }
+    options(requestUrl, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    get(requestUrl, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('GET', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    del(requestUrl, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    post(requestUrl, data, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('POST', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    patch(requestUrl, data, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    put(requestUrl, data, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('PUT', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    head(requestUrl, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    sendStream(verb, requestUrl, stream, additionalHeaders) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return this.request(verb, requestUrl, stream, additionalHeaders);
+        });
+    }
+    /**
+     * Gets a typed object from an endpoint
+     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
+     */
+    getJson(requestUrl_1) {
+        return __awaiter$4(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            const res = yield this.get(requestUrl, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    postJson(requestUrl_1, obj_1) {
+        return __awaiter$4(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.post(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    putJson(requestUrl_1, obj_1) {
+        return __awaiter$4(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.put(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    patchJson(requestUrl_1, obj_1) {
+        return __awaiter$4(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.patch(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    /**
+     * Makes a raw http request.
+     * All other methods such as get, post, patch, and request ultimately call this.
+     * Prefer get, del, post and patch
+     */
+    request(verb, requestUrl, data, headers) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            if (this._disposed) {
+                throw new Error('Client has already been disposed.');
+            }
+            const parsedUrl = new URL(requestUrl);
+            let info = this._prepareRequest(verb, parsedUrl, headers);
+            // Only perform retries on reads since writes may not be idempotent.
+            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
+                ? this._maxRetries + 1
+                : 1;
+            let numTries = 0;
+            let response;
+            do {
+                response = yield this.requestRaw(info, data);
+                // Check if it's an authentication challenge
+                if (response &&
+                    response.message &&
+                    response.message.statusCode === HttpCodes.Unauthorized) {
+                    let authenticationHandler;
+                    for (const handler of this.handlers) {
+                        if (handler.canHandleAuthentication(response)) {
+                            authenticationHandler = handler;
+                            break;
+                        }
+                    }
+                    if (authenticationHandler) {
+                        return authenticationHandler.handleAuthentication(this, info, data);
+                    }
+                    else {
+                        // We have received an unauthorized response but have no handlers to handle it.
+                        // Let the response return to the caller.
+                        return response;
+                    }
+                }
+                let redirectsRemaining = this._maxRedirects;
+                while (response.message.statusCode &&
+                    HttpRedirectCodes.includes(response.message.statusCode) &&
+                    this._allowRedirects &&
+                    redirectsRemaining > 0) {
+                    const redirectUrl = response.message.headers['location'];
+                    if (!redirectUrl) {
+                        // if there's no location to redirect to, we won't
+                        break;
+                    }
+                    const parsedRedirectUrl = new URL(redirectUrl);
+                    if (parsedUrl.protocol === 'https:' &&
+                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
+                        !this._allowRedirectDowngrade) {
+                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
+                    }
+                    // we need to finish reading the response before reassigning response
+                    // which will leak the open socket.
+                    yield response.readBody();
+                    // strip authorization header if redirected to a different hostname
+                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
+                        for (const header in headers) {
+                            // header names are case insensitive
+                            if (header.toLowerCase() === 'authorization') {
+                                delete headers[header];
+                            }
+                        }
+                    }
+                    // let's make the request with the new redirectUrl
+                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
+                    response = yield this.requestRaw(info, data);
+                    redirectsRemaining--;
+                }
+                if (!response.message.statusCode ||
+                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
+                    // If not a retry code, return immediately instead of retrying
+                    return response;
+                }
+                numTries += 1;
+                if (numTries < maxTries) {
+                    yield response.readBody();
+                    yield this._performExponentialBackoff(numTries);
+                }
+            } while (numTries < maxTries);
+            return response;
+        });
+    }
+    /**
+     * Needs to be called if keepAlive is set to true in request options.
+     */
+    dispose() {
+        if (this._agent) {
+            this._agent.destroy();
+        }
+        this._disposed = true;
+    }
+    /**
+     * Raw request.
+     * @param info
+     * @param data
+     */
+    requestRaw(info, data) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => {
+                function callbackForResult(err, res) {
+                    if (err) {
+                        reject(err);
+                    }
+                    else if (!res) {
+                        // If `err` is not passed, then `res` must be passed.
+                        reject(new Error('Unknown error'));
+                    }
+                    else {
+                        resolve(res);
+                    }
+                }
+                this.requestRawWithCallback(info, data, callbackForResult);
+            });
+        });
+    }
+    /**
+     * Raw request with callback.
+     * @param info
+     * @param data
+     * @param onResult
+     */
+    requestRawWithCallback(info, data, onResult) {
+        if (typeof data === 'string') {
+            if (!info.options.headers) {
+                info.options.headers = {};
+            }
+            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
+        }
+        let callbackCalled = false;
+        function handleResult(err, res) {
+            if (!callbackCalled) {
+                callbackCalled = true;
+                onResult(err, res);
+            }
+        }
+        const req = info.httpModule.request(info.options, (msg) => {
+            const res = new HttpClientResponse(msg);
+            handleResult(undefined, res);
+        });
+        let socket;
+        req.on('socket', sock => {
+            socket = sock;
+        });
+        // If we ever get disconnected, we want the socket to timeout eventually
+        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
+            if (socket) {
+                socket.end();
+            }
+            handleResult(new Error(`Request timeout: ${info.options.path}`));
+        });
+        req.on('error', function (err) {
+            // err has statusCode property
+            // res should have headers
+            handleResult(err);
+        });
+        if (data && typeof data === 'string') {
+            req.write(data, 'utf8');
+        }
+        if (data && typeof data !== 'string') {
+            data.on('close', function () {
+                req.end();
+            });
+            data.pipe(req);
+        }
+        else {
+            req.end();
+        }
+    }
+    /**
+     * Gets an http agent. This function is useful when you need an http agent that handles
+     * routing through a proxy server - depending upon the url and proxy environment variables.
+     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
+     */
+    getAgent(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        return this._getAgent(parsedUrl);
+    }
+    getAgentDispatcher(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (!useProxy) {
+            return;
+        }
+        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
+    }
+    _prepareRequest(method, requestUrl, headers) {
+        const info = {};
+        info.parsedUrl = requestUrl;
+        const usingSsl = info.parsedUrl.protocol === 'https:';
+        info.httpModule = usingSsl ? https : http;
+        const defaultPort = usingSsl ? 443 : 80;
+        info.options = {};
+        info.options.host = info.parsedUrl.hostname;
+        info.options.port = info.parsedUrl.port
+            ? parseInt(info.parsedUrl.port)
+            : defaultPort;
+        info.options.path =
+            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
+        info.options.method = method;
+        info.options.headers = this._mergeHeaders(headers);
+        if (this.userAgent != null) {
+            info.options.headers['user-agent'] = this.userAgent;
+        }
+        info.options.agent = this._getAgent(info.parsedUrl);
+        // gives handlers an opportunity to participate
+        if (this.handlers) {
+            for (const handler of this.handlers) {
+                handler.prepareRequest(info.options);
+            }
+        }
+        return info;
+    }
+    _mergeHeaders(headers) {
+        if (this.requestOptions && this.requestOptions.headers) {
+            return Object.assign({}, lowercaseKeys(this.requestOptions.headers), lowercaseKeys(headers || {}));
+        }
+        return lowercaseKeys(headers || {});
+    }
+    /**
+     * Gets an existing header value or returns a default.
+     * Handles converting number header values to strings since HTTP headers must be strings.
+     * Note: This returns string | string[] since some headers can have multiple values.
+     * For headers that must always be a single string (like Content-Type), use the
+     * specialized _getExistingOrDefaultContentTypeHeader method instead.
+     */
+    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys(this.requestOptions.headers)[header];
+            if (headerValue) {
+                clientHeader =
+                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
+            }
+        }
+        const additionalValue = additionalHeaders[header];
+        if (additionalValue !== undefined) {
+            return typeof additionalValue === 'number'
+                ? additionalValue.toString()
+                : additionalValue;
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    /**
+     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
+     * Always returns a single string (not an array) since Content-Type should be a single value.
+     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
+     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
+     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
+     */
+    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys(this.requestOptions.headers)[Headers.ContentType];
+            if (headerValue) {
+                if (typeof headerValue === 'number') {
+                    clientHeader = String(headerValue);
+                }
+                else if (Array.isArray(headerValue)) {
+                    clientHeader = headerValue.join(', ');
+                }
+                else {
+                    clientHeader = headerValue;
+                }
+            }
+        }
+        const additionalValue = additionalHeaders[Headers.ContentType];
+        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
+        if (additionalValue !== undefined) {
+            if (typeof additionalValue === 'number') {
+                return String(additionalValue);
+            }
+            else if (Array.isArray(additionalValue)) {
+                return additionalValue.join(', ');
+            }
+            else {
+                return additionalValue;
+            }
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    _getAgent(parsedUrl) {
+        let agent;
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (this._keepAlive && useProxy) {
+            agent = this._proxyAgent;
+        }
+        if (!useProxy) {
+            agent = this._agent;
+        }
+        // if agent is already assigned use that agent.
+        if (agent) {
+            return agent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        let maxSockets = 100;
+        if (this.requestOptions) {
+            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
+        }
+        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
+        if (proxyUrl && proxyUrl.hostname) {
+            const agentOptions = {
+                maxSockets,
+                keepAlive: this._keepAlive,
+                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
+                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
+                })), { host: proxyUrl.hostname, port: proxyUrl.port })
+            };
+            let tunnelAgent;
+            const overHttps = proxyUrl.protocol === 'https:';
+            if (usingSsl) {
+                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
+            }
+            else {
+                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
+            }
+            agent = tunnelAgent(agentOptions);
+            this._proxyAgent = agent;
+        }
+        // if tunneling agent isn't assigned create a new agent
+        if (!agent) {
+            const options = { keepAlive: this._keepAlive, maxSockets };
+            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
+            this._agent = agent;
+        }
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            agent.options = Object.assign(agent.options || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return agent;
+    }
+    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
+        let proxyAgent;
+        if (this._keepAlive) {
+            proxyAgent = this._proxyAgentDispatcher;
+        }
+        // if agent is already assigned use that agent.
+        if (proxyAgent) {
+            return proxyAgent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
+            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
+        })));
+        this._proxyAgentDispatcher = proxyAgent;
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return proxyAgent;
+    }
+    _getUserAgentWithOrchestrationId(userAgent) {
+        const baseUserAgent = userAgent || 'actions/http-client';
+        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
+        if (orchId) {
+            // Sanitize the orchestration ID to ensure it contains only valid characters
+            // Valid characters: 0-9, a-z, _, -, .
+            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
+            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
+        }
+        return baseUserAgent;
+    }
+    _performExponentialBackoff(retryNumber) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
+            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
+            return new Promise(resolve => setTimeout(() => resolve(), ms));
+        });
+    }
+    _processResponse(res, options) {
+        return __awaiter$4(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => __awaiter$4(this, void 0, void 0, function* () {
+                const statusCode = res.message.statusCode || 0;
+                const response = {
+                    statusCode,
+                    result: null,
+                    headers: {}
+                };
+                // not found leads to null obj returned
+                if (statusCode === HttpCodes.NotFound) {
+                    resolve(response);
+                }
+                // get the result from the body
+                function dateTimeDeserializer(key, value) {
+                    if (typeof value === 'string') {
+                        const a = new Date(value);
+                        if (!isNaN(a.valueOf())) {
+                            return a;
+                        }
+                    }
+                    return value;
+                }
+                let obj;
+                let contents;
+                try {
+                    contents = yield res.readBody();
+                    if (contents && contents.length > 0) {
+                        if (options && options.deserializeDates) {
+                            obj = JSON.parse(contents, dateTimeDeserializer);
+                        }
+                        else {
+                            obj = JSON.parse(contents);
+                        }
+                        response.result = obj;
+                    }
+                    response.headers = res.message.headers;
+                }
+                catch (err) {
+                    // Invalid resource (contents not json);  leaving result obj null
+                }
+                // note that 3xx redirects are handled by the http layer.
+                if (statusCode > 299) {
+                    let msg;
+                    // if exception/error in body, attempt to get better error
+                    if (obj && obj.message) {
+                        msg = obj.message;
+                    }
+                    else if (contents && contents.length > 0) {
+                        // it may be the case that the exception is in the body message as string
+                        msg = contents;
+                    }
+                    else {
+                        msg = `Failed request: (${statusCode})`;
+                    }
+                    const err = new HttpClientError(msg, statusCode);
+                    err.result = response.result;
+                    reject(err);
+                }
+                else {
+                    resolve(response);
+                }
+            }));
+        });
+    }
+}
+const lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -38226,7 +39290,7 @@ var MediaTypes$1;
 };
 const { access, appendFile, writeFile } = promises;
 
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$3 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38235,12 +39299,48 @@ const { access, appendFile, writeFile } = promises;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-const { chmod: chmod$1, copyFile: copyFile$2, lstat: lstat$1, mkdir: mkdir$1, open: open$1, readdir: readdir$1, rename: rename$1, rm: rm$1, rmdir: rmdir$1, stat: stat$1, symlink: symlink$1, unlink: unlink$1 } = fs.promises;
+const { chmod, copyFile: copyFile$1, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
 // export const {open} = 'fs'
-process.platform === 'win32';
+const IS_WINDOWS = process.platform === 'win32';
+/**
+ * Custom implementation of readlink to ensure Windows junctions
+ * maintain trailing backslash for backward compatibility with Node.js < 24
+ *
+ * In Node.js 20, Windows junctions (directory symlinks) always returned paths
+ * with trailing backslashes. Node.js 24 removed this behavior, which breaks
+ * code that relied on this format for path operations.
+ *
+ * This implementation restores the Node 20 behavior by adding a trailing
+ * backslash to all junction results on Windows.
+ */
+function readlink(fsPath) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const result = yield fs.promises.readlink(fsPath);
+        // On Windows, restore Node 20 behavior: add trailing backslash to all results
+        // since junctions on Windows are always directory links
+        if (IS_WINDOWS && !result.endsWith('\\')) {
+            return `${result}\\`;
+        }
+        return result;
+    });
+}
 fs.constants.O_RDONLY;
+function exists(fsPath) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        try {
+            yield stat(fsPath);
+        }
+        catch (err) {
+            if (err.code === 'ENOENT') {
+                return false;
+            }
+            throw err;
+        }
+        return true;
+    });
+}
 
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$2 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38249,6 +39349,146 @@ fs.constants.O_RDONLY;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+/**
+ * Copies a file or folder.
+ * Based off of shelljs - https://github.com/shelljs/shelljs/blob/9237f66c52e5daa40458f94f9565e18e8132f5a6/src/cp.js
+ *
+ * @param     source    source path
+ * @param     dest      destination path
+ * @param     options   optional. See CopyOptions.
+ */
+function cp(source_1, dest_1) {
+    return __awaiter$2(this, arguments, void 0, function* (source, dest, options = {}) {
+        const { force, recursive, copySourceDirectory } = readCopyOptions(options);
+        const destStat = (yield exists(dest)) ? yield stat(dest) : null;
+        // Dest is an existing file, but not forcing
+        if (destStat && destStat.isFile() && !force) {
+            return;
+        }
+        // If dest is an existing directory, should copy inside.
+        const newDest = destStat && destStat.isDirectory() && copySourceDirectory
+            ? path.join(dest, path.basename(source))
+            : dest;
+        if (!(yield exists(source))) {
+            throw new Error(`no such file or directory: ${source}`);
+        }
+        const sourceStat = yield stat(source);
+        if (sourceStat.isDirectory()) {
+            if (!recursive) {
+                throw new Error(`Failed to copy. ${source} is a directory, but tried to copy without recursive flag.`);
+            }
+            else {
+                yield cpDirRecursive(source, newDest, 0, force);
+            }
+        }
+        else {
+            if (path.relative(source, newDest) === '') {
+                // a file cannot be copied to itself
+                throw new Error(`'${newDest}' and '${source}' are the same file`);
+            }
+            yield copyFile(source, newDest, force);
+        }
+    });
+}
+/**
+ * Remove a path recursively with force
+ *
+ * @param inputPath path to remove
+ */
+function rmRF(inputPath) {
+    return __awaiter$2(this, void 0, void 0, function* () {
+        if (IS_WINDOWS) {
+            // Check for invalid characters
+            // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+            if (/[*"<>|]/.test(inputPath)) {
+                throw new Error('File path must not contain `*`, `"`, `<`, `>` or `|` on Windows');
+            }
+        }
+        try {
+            // note if path does not exist, error is silent
+            yield rm(inputPath, {
+                force: true,
+                maxRetries: 3,
+                recursive: true,
+                retryDelay: 300
+            });
+        }
+        catch (err) {
+            throw new Error(`File was unable to be removed ${err}`);
+        }
+    });
+}
+/**
+ * Make a directory.  Creates the full path with folders in between
+ * Will throw if it fails
+ *
+ * @param   fsPath        path to create
+ * @returns Promise<void>
+ */
+function mkdirP(fsPath) {
+    return __awaiter$2(this, void 0, void 0, function* () {
+        ok(fsPath, 'a path argument must be provided');
+        yield mkdir(fsPath, { recursive: true });
+    });
+}
+function readCopyOptions(options) {
+    const force = options.force == null ? true : options.force;
+    const recursive = Boolean(options.recursive);
+    const copySourceDirectory = options.copySourceDirectory == null
+        ? true
+        : Boolean(options.copySourceDirectory);
+    return { force, recursive, copySourceDirectory };
+}
+function cpDirRecursive(sourceDir, destDir, currentDepth, force) {
+    return __awaiter$2(this, void 0, void 0, function* () {
+        // Ensure there is not a run away recursive copy
+        if (currentDepth >= 255)
+            return;
+        currentDepth++;
+        yield mkdirP(destDir);
+        const files = yield readdir(sourceDir);
+        for (const fileName of files) {
+            const srcFile = `${sourceDir}/${fileName}`;
+            const destFile = `${destDir}/${fileName}`;
+            const srcFileStat = yield lstat(srcFile);
+            if (srcFileStat.isDirectory()) {
+                // Recurse
+                yield cpDirRecursive(srcFile, destFile, currentDepth, force);
+            }
+            else {
+                yield copyFile(srcFile, destFile, force);
+            }
+        }
+        // Change the mode for the newly created directory
+        yield chmod(destDir, (yield stat(sourceDir)).mode);
+    });
+}
+// Buffered file copy
+function copyFile(srcFile, destFile, force) {
+    return __awaiter$2(this, void 0, void 0, function* () {
+        if ((yield lstat(srcFile)).isSymbolicLink()) {
+            // unlink/re-link it
+            try {
+                yield lstat(destFile);
+                yield unlink(destFile);
+            }
+            catch (e) {
+                // Try to override file permission
+                if (e.code === 'EPERM') {
+                    yield chmod(destFile, '0666');
+                    yield unlink(destFile);
+                }
+                // other errors = it doesn't exist, no work to do
+            }
+            // Copy over symlink
+            const symlinkFull = yield readlink(srcFile);
+            yield symlink(symlinkFull, destFile, IS_WINDOWS ? 'junction' : null);
+        }
+        else if (!(yield exists(destFile)) || force) {
+            yield copyFile$1(srcFile, destFile);
+        }
+    });
+}
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -38376,206 +39616,6 @@ function warning(message, properties = {}) {
  */
 function info(message) {
     process.stdout.write(message + os.EOL);
-}
-
-var __awaiter$4 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-const { chmod, copyFile: copyFile$1, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
-// export const {open} = 'fs'
-const IS_WINDOWS = process.platform === 'win32';
-/**
- * Custom implementation of readlink to ensure Windows junctions
- * maintain trailing backslash for backward compatibility with Node.js < 24
- *
- * In Node.js 20, Windows junctions (directory symlinks) always returned paths
- * with trailing backslashes. Node.js 24 removed this behavior, which breaks
- * code that relied on this format for path operations.
- *
- * This implementation restores the Node 20 behavior by adding a trailing
- * backslash to all junction results on Windows.
- */
-function readlink(fsPath) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        const result = yield fs.promises.readlink(fsPath);
-        // On Windows, restore Node 20 behavior: add trailing backslash to all results
-        // since junctions on Windows are always directory links
-        if (IS_WINDOWS && !result.endsWith('\\')) {
-            return `${result}\\`;
-        }
-        return result;
-    });
-}
-fs.constants.O_RDONLY;
-function exists(fsPath) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        try {
-            yield stat(fsPath);
-        }
-        catch (err) {
-            if (err.code === 'ENOENT') {
-                return false;
-            }
-            throw err;
-        }
-        return true;
-    });
-}
-
-var __awaiter$3 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-/**
- * Copies a file or folder.
- * Based off of shelljs - https://github.com/shelljs/shelljs/blob/9237f66c52e5daa40458f94f9565e18e8132f5a6/src/cp.js
- *
- * @param     source    source path
- * @param     dest      destination path
- * @param     options   optional. See CopyOptions.
- */
-function cp(source_1, dest_1) {
-    return __awaiter$3(this, arguments, void 0, function* (source, dest, options = {}) {
-        const { force, recursive, copySourceDirectory } = readCopyOptions(options);
-        const destStat = (yield exists(dest)) ? yield stat(dest) : null;
-        // Dest is an existing file, but not forcing
-        if (destStat && destStat.isFile() && !force) {
-            return;
-        }
-        // If dest is an existing directory, should copy inside.
-        const newDest = destStat && destStat.isDirectory() && copySourceDirectory
-            ? path.join(dest, path.basename(source))
-            : dest;
-        if (!(yield exists(source))) {
-            throw new Error(`no such file or directory: ${source}`);
-        }
-        const sourceStat = yield stat(source);
-        if (sourceStat.isDirectory()) {
-            if (!recursive) {
-                throw new Error(`Failed to copy. ${source} is a directory, but tried to copy without recursive flag.`);
-            }
-            else {
-                yield cpDirRecursive(source, newDest, 0, force);
-            }
-        }
-        else {
-            if (path.relative(source, newDest) === '') {
-                // a file cannot be copied to itself
-                throw new Error(`'${newDest}' and '${source}' are the same file`);
-            }
-            yield copyFile(source, newDest, force);
-        }
-    });
-}
-/**
- * Remove a path recursively with force
- *
- * @param inputPath path to remove
- */
-function rmRF(inputPath) {
-    return __awaiter$3(this, void 0, void 0, function* () {
-        if (IS_WINDOWS) {
-            // Check for invalid characters
-            // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
-            if (/[*"<>|]/.test(inputPath)) {
-                throw new Error('File path must not contain `*`, `"`, `<`, `>` or `|` on Windows');
-            }
-        }
-        try {
-            // note if path does not exist, error is silent
-            yield rm(inputPath, {
-                force: true,
-                maxRetries: 3,
-                recursive: true,
-                retryDelay: 300
-            });
-        }
-        catch (err) {
-            throw new Error(`File was unable to be removed ${err}`);
-        }
-    });
-}
-/**
- * Make a directory.  Creates the full path with folders in between
- * Will throw if it fails
- *
- * @param   fsPath        path to create
- * @returns Promise<void>
- */
-function mkdirP(fsPath) {
-    return __awaiter$3(this, void 0, void 0, function* () {
-        ok(fsPath, 'a path argument must be provided');
-        yield mkdir(fsPath, { recursive: true });
-    });
-}
-function readCopyOptions(options) {
-    const force = options.force == null ? true : options.force;
-    const recursive = Boolean(options.recursive);
-    const copySourceDirectory = options.copySourceDirectory == null
-        ? true
-        : Boolean(options.copySourceDirectory);
-    return { force, recursive, copySourceDirectory };
-}
-function cpDirRecursive(sourceDir, destDir, currentDepth, force) {
-    return __awaiter$3(this, void 0, void 0, function* () {
-        // Ensure there is not a run away recursive copy
-        if (currentDepth >= 255)
-            return;
-        currentDepth++;
-        yield mkdirP(destDir);
-        const files = yield readdir(sourceDir);
-        for (const fileName of files) {
-            const srcFile = `${sourceDir}/${fileName}`;
-            const destFile = `${destDir}/${fileName}`;
-            const srcFileStat = yield lstat(srcFile);
-            if (srcFileStat.isDirectory()) {
-                // Recurse
-                yield cpDirRecursive(srcFile, destFile, currentDepth, force);
-            }
-            else {
-                yield copyFile(srcFile, destFile, force);
-            }
-        }
-        // Change the mode for the newly created directory
-        yield chmod(destDir, (yield stat(sourceDir)).mode);
-    });
-}
-// Buffered file copy
-function copyFile(srcFile, destFile, force) {
-    return __awaiter$3(this, void 0, void 0, function* () {
-        if ((yield lstat(srcFile)).isSymbolicLink()) {
-            // unlink/re-link it
-            try {
-                yield lstat(destFile);
-                yield unlink(destFile);
-            }
-            catch (e) {
-                // Try to override file permission
-                if (e.code === 'EPERM') {
-                    yield chmod(destFile, '0666');
-                    yield unlink(destFile);
-                }
-                // other errors = it doesn't exist, no work to do
-            }
-            // Copy over symlink
-            const symlinkFull = yield readlink(srcFile);
-            yield symlink(symlinkFull, destFile, IS_WINDOWS ? 'junction' : null);
-        }
-        else if (!(yield exists(destFile)) || force) {
-            yield copyFile$1(srcFile, destFile);
-        }
-    });
 }
 
 var re = {exports: {}};
@@ -41403,775 +42443,6 @@ var semverExports = requireSemver();
     });
 };
 
-function getProxyUrl(reqUrl) {
-    const usingSsl = reqUrl.protocol === 'https:';
-    if (checkBypass(reqUrl)) {
-        return undefined;
-    }
-    const proxyVar = (() => {
-        if (usingSsl) {
-            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
-        }
-        else {
-            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
-        }
-    })();
-    if (proxyVar) {
-        try {
-            return new DecodedURL(proxyVar);
-        }
-        catch (_a) {
-            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
-                return new DecodedURL(`http://${proxyVar}`);
-        }
-    }
-    else {
-        return undefined;
-    }
-}
-function checkBypass(reqUrl) {
-    if (!reqUrl.hostname) {
-        return false;
-    }
-    const reqHost = reqUrl.hostname;
-    if (isLoopbackAddress(reqHost)) {
-        return true;
-    }
-    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
-    if (!noProxy) {
-        return false;
-    }
-    // Determine the request port
-    let reqPort;
-    if (reqUrl.port) {
-        reqPort = Number(reqUrl.port);
-    }
-    else if (reqUrl.protocol === 'http:') {
-        reqPort = 80;
-    }
-    else if (reqUrl.protocol === 'https:') {
-        reqPort = 443;
-    }
-    // Format the request hostname and hostname with port
-    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
-    if (typeof reqPort === 'number') {
-        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
-    }
-    // Compare request host against noproxy
-    for (const upperNoProxyItem of noProxy
-        .split(',')
-        .map(x => x.trim().toUpperCase())
-        .filter(x => x)) {
-        if (upperNoProxyItem === '*' ||
-            upperReqHosts.some(x => x === upperNoProxyItem ||
-                x.endsWith(`.${upperNoProxyItem}`) ||
-                (upperNoProxyItem.startsWith('.') &&
-                    x.endsWith(`${upperNoProxyItem}`)))) {
-            return true;
-        }
-    }
-    return false;
-}
-function isLoopbackAddress(host) {
-    const hostLower = host.toLowerCase();
-    return (hostLower === 'localhost' ||
-        hostLower.startsWith('127.') ||
-        hostLower.startsWith('[::1]') ||
-        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
-}
-class DecodedURL extends URL {
-    constructor(url, base) {
-        super(url, base);
-        this._decodedUsername = decodeURIComponent(super.username);
-        this._decodedPassword = decodeURIComponent(super.password);
-    }
-    get username() {
-        return this._decodedUsername;
-    }
-    get password() {
-        return this._decodedPassword;
-    }
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-var __awaiter$2 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var HttpCodes;
-(function (HttpCodes) {
-    HttpCodes[HttpCodes["OK"] = 200] = "OK";
-    HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
-    HttpCodes[HttpCodes["MovedPermanently"] = 301] = "MovedPermanently";
-    HttpCodes[HttpCodes["ResourceMoved"] = 302] = "ResourceMoved";
-    HttpCodes[HttpCodes["SeeOther"] = 303] = "SeeOther";
-    HttpCodes[HttpCodes["NotModified"] = 304] = "NotModified";
-    HttpCodes[HttpCodes["UseProxy"] = 305] = "UseProxy";
-    HttpCodes[HttpCodes["SwitchProxy"] = 306] = "SwitchProxy";
-    HttpCodes[HttpCodes["TemporaryRedirect"] = 307] = "TemporaryRedirect";
-    HttpCodes[HttpCodes["PermanentRedirect"] = 308] = "PermanentRedirect";
-    HttpCodes[HttpCodes["BadRequest"] = 400] = "BadRequest";
-    HttpCodes[HttpCodes["Unauthorized"] = 401] = "Unauthorized";
-    HttpCodes[HttpCodes["PaymentRequired"] = 402] = "PaymentRequired";
-    HttpCodes[HttpCodes["Forbidden"] = 403] = "Forbidden";
-    HttpCodes[HttpCodes["NotFound"] = 404] = "NotFound";
-    HttpCodes[HttpCodes["MethodNotAllowed"] = 405] = "MethodNotAllowed";
-    HttpCodes[HttpCodes["NotAcceptable"] = 406] = "NotAcceptable";
-    HttpCodes[HttpCodes["ProxyAuthenticationRequired"] = 407] = "ProxyAuthenticationRequired";
-    HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
-    HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
-    HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
-    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
-    HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
-    HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
-    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
-    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
-    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes || (HttpCodes = {}));
-var Headers;
-(function (Headers) {
-    Headers["Accept"] = "accept";
-    Headers["ContentType"] = "content-type";
-})(Headers || (Headers = {}));
-var MediaTypes;
-(function (MediaTypes) {
-    MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes || (MediaTypes = {}));
-const HttpRedirectCodes = [
-    HttpCodes.MovedPermanently,
-    HttpCodes.ResourceMoved,
-    HttpCodes.SeeOther,
-    HttpCodes.TemporaryRedirect,
-    HttpCodes.PermanentRedirect
-];
-const HttpResponseRetryCodes = [
-    HttpCodes.BadGateway,
-    HttpCodes.ServiceUnavailable,
-    HttpCodes.GatewayTimeout
-];
-const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
-const ExponentialBackoffCeiling = 10;
-const ExponentialBackoffTimeSlice = 5;
-class HttpClientError extends Error {
-    constructor(message, statusCode) {
-        super(message);
-        this.name = 'HttpClientError';
-        this.statusCode = statusCode;
-        Object.setPrototypeOf(this, HttpClientError.prototype);
-    }
-}
-class HttpClientResponse {
-    constructor(message) {
-        this.message = message;
-    }
-    readBody() {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$2(this, void 0, void 0, function* () {
-                let output = Buffer.alloc(0);
-                this.message.on('data', (chunk) => {
-                    output = Buffer.concat([output, chunk]);
-                });
-                this.message.on('end', () => {
-                    resolve(output.toString());
-                });
-            }));
-        });
-    }
-    readBodyBuffer() {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$2(this, void 0, void 0, function* () {
-                const chunks = [];
-                this.message.on('data', (chunk) => {
-                    chunks.push(chunk);
-                });
-                this.message.on('end', () => {
-                    resolve(Buffer.concat(chunks));
-                });
-            }));
-        });
-    }
-}
-class HttpClient {
-    constructor(userAgent, handlers, requestOptions) {
-        this._ignoreSslError = false;
-        this._allowRedirects = true;
-        this._allowRedirectDowngrade = false;
-        this._maxRedirects = 50;
-        this._allowRetries = false;
-        this._maxRetries = 1;
-        this._keepAlive = false;
-        this._disposed = false;
-        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
-        this.handlers = handlers || [];
-        this.requestOptions = requestOptions;
-        if (requestOptions) {
-            if (requestOptions.ignoreSslError != null) {
-                this._ignoreSslError = requestOptions.ignoreSslError;
-            }
-            this._socketTimeout = requestOptions.socketTimeout;
-            if (requestOptions.allowRedirects != null) {
-                this._allowRedirects = requestOptions.allowRedirects;
-            }
-            if (requestOptions.allowRedirectDowngrade != null) {
-                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
-            }
-            if (requestOptions.maxRedirects != null) {
-                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
-            }
-            if (requestOptions.keepAlive != null) {
-                this._keepAlive = requestOptions.keepAlive;
-            }
-            if (requestOptions.allowRetries != null) {
-                this._allowRetries = requestOptions.allowRetries;
-            }
-            if (requestOptions.maxRetries != null) {
-                this._maxRetries = requestOptions.maxRetries;
-            }
-        }
-    }
-    options(requestUrl, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    get(requestUrl, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('GET', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    del(requestUrl, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    post(requestUrl, data, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('POST', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    patch(requestUrl, data, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    put(requestUrl, data, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('PUT', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    head(requestUrl, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    sendStream(verb, requestUrl, stream, additionalHeaders) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return this.request(verb, requestUrl, stream, additionalHeaders);
-        });
-    }
-    /**
-     * Gets a typed object from an endpoint
-     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
-     */
-    getJson(requestUrl_1) {
-        return __awaiter$2(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            const res = yield this.get(requestUrl, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    postJson(requestUrl_1, obj_1) {
-        return __awaiter$2(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            additionalHeaders[Headers.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
-            const res = yield this.post(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    putJson(requestUrl_1, obj_1) {
-        return __awaiter$2(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            additionalHeaders[Headers.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
-            const res = yield this.put(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    patchJson(requestUrl_1, obj_1) {
-        return __awaiter$2(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            additionalHeaders[Headers.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
-            const res = yield this.patch(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    /**
-     * Makes a raw http request.
-     * All other methods such as get, post, patch, and request ultimately call this.
-     * Prefer get, del, post and patch
-     */
-    request(verb, requestUrl, data, headers) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            if (this._disposed) {
-                throw new Error('Client has already been disposed.');
-            }
-            const parsedUrl = new URL(requestUrl);
-            let info = this._prepareRequest(verb, parsedUrl, headers);
-            // Only perform retries on reads since writes may not be idempotent.
-            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
-                ? this._maxRetries + 1
-                : 1;
-            let numTries = 0;
-            let response;
-            do {
-                response = yield this.requestRaw(info, data);
-                // Check if it's an authentication challenge
-                if (response &&
-                    response.message &&
-                    response.message.statusCode === HttpCodes.Unauthorized) {
-                    let authenticationHandler;
-                    for (const handler of this.handlers) {
-                        if (handler.canHandleAuthentication(response)) {
-                            authenticationHandler = handler;
-                            break;
-                        }
-                    }
-                    if (authenticationHandler) {
-                        return authenticationHandler.handleAuthentication(this, info, data);
-                    }
-                    else {
-                        // We have received an unauthorized response but have no handlers to handle it.
-                        // Let the response return to the caller.
-                        return response;
-                    }
-                }
-                let redirectsRemaining = this._maxRedirects;
-                while (response.message.statusCode &&
-                    HttpRedirectCodes.includes(response.message.statusCode) &&
-                    this._allowRedirects &&
-                    redirectsRemaining > 0) {
-                    const redirectUrl = response.message.headers['location'];
-                    if (!redirectUrl) {
-                        // if there's no location to redirect to, we won't
-                        break;
-                    }
-                    const parsedRedirectUrl = new URL(redirectUrl);
-                    if (parsedUrl.protocol === 'https:' &&
-                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
-                        !this._allowRedirectDowngrade) {
-                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
-                    }
-                    // we need to finish reading the response before reassigning response
-                    // which will leak the open socket.
-                    yield response.readBody();
-                    // strip authorization header if redirected to a different hostname
-                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
-                        for (const header in headers) {
-                            // header names are case insensitive
-                            if (header.toLowerCase() === 'authorization') {
-                                delete headers[header];
-                            }
-                        }
-                    }
-                    // let's make the request with the new redirectUrl
-                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
-                    response = yield this.requestRaw(info, data);
-                    redirectsRemaining--;
-                }
-                if (!response.message.statusCode ||
-                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
-                    // If not a retry code, return immediately instead of retrying
-                    return response;
-                }
-                numTries += 1;
-                if (numTries < maxTries) {
-                    yield response.readBody();
-                    yield this._performExponentialBackoff(numTries);
-                }
-            } while (numTries < maxTries);
-            return response;
-        });
-    }
-    /**
-     * Needs to be called if keepAlive is set to true in request options.
-     */
-    dispose() {
-        if (this._agent) {
-            this._agent.destroy();
-        }
-        this._disposed = true;
-    }
-    /**
-     * Raw request.
-     * @param info
-     * @param data
-     */
-    requestRaw(info, data) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => {
-                function callbackForResult(err, res) {
-                    if (err) {
-                        reject(err);
-                    }
-                    else if (!res) {
-                        // If `err` is not passed, then `res` must be passed.
-                        reject(new Error('Unknown error'));
-                    }
-                    else {
-                        resolve(res);
-                    }
-                }
-                this.requestRawWithCallback(info, data, callbackForResult);
-            });
-        });
-    }
-    /**
-     * Raw request with callback.
-     * @param info
-     * @param data
-     * @param onResult
-     */
-    requestRawWithCallback(info, data, onResult) {
-        if (typeof data === 'string') {
-            if (!info.options.headers) {
-                info.options.headers = {};
-            }
-            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
-        }
-        let callbackCalled = false;
-        function handleResult(err, res) {
-            if (!callbackCalled) {
-                callbackCalled = true;
-                onResult(err, res);
-            }
-        }
-        const req = info.httpModule.request(info.options, (msg) => {
-            const res = new HttpClientResponse(msg);
-            handleResult(undefined, res);
-        });
-        let socket;
-        req.on('socket', sock => {
-            socket = sock;
-        });
-        // If we ever get disconnected, we want the socket to timeout eventually
-        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
-            if (socket) {
-                socket.end();
-            }
-            handleResult(new Error(`Request timeout: ${info.options.path}`));
-        });
-        req.on('error', function (err) {
-            // err has statusCode property
-            // res should have headers
-            handleResult(err);
-        });
-        if (data && typeof data === 'string') {
-            req.write(data, 'utf8');
-        }
-        if (data && typeof data !== 'string') {
-            data.on('close', function () {
-                req.end();
-            });
-            data.pipe(req);
-        }
-        else {
-            req.end();
-        }
-    }
-    /**
-     * Gets an http agent. This function is useful when you need an http agent that handles
-     * routing through a proxy server - depending upon the url and proxy environment variables.
-     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
-     */
-    getAgent(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        return this._getAgent(parsedUrl);
-    }
-    getAgentDispatcher(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        const proxyUrl = getProxyUrl(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (!useProxy) {
-            return;
-        }
-        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
-    }
-    _prepareRequest(method, requestUrl, headers) {
-        const info = {};
-        info.parsedUrl = requestUrl;
-        const usingSsl = info.parsedUrl.protocol === 'https:';
-        info.httpModule = usingSsl ? https : http;
-        const defaultPort = usingSsl ? 443 : 80;
-        info.options = {};
-        info.options.host = info.parsedUrl.hostname;
-        info.options.port = info.parsedUrl.port
-            ? parseInt(info.parsedUrl.port)
-            : defaultPort;
-        info.options.path =
-            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
-        info.options.method = method;
-        info.options.headers = this._mergeHeaders(headers);
-        if (this.userAgent != null) {
-            info.options.headers['user-agent'] = this.userAgent;
-        }
-        info.options.agent = this._getAgent(info.parsedUrl);
-        // gives handlers an opportunity to participate
-        if (this.handlers) {
-            for (const handler of this.handlers) {
-                handler.prepareRequest(info.options);
-            }
-        }
-        return info;
-    }
-    _mergeHeaders(headers) {
-        if (this.requestOptions && this.requestOptions.headers) {
-            return Object.assign({}, lowercaseKeys(this.requestOptions.headers), lowercaseKeys(headers || {}));
-        }
-        return lowercaseKeys(headers || {});
-    }
-    /**
-     * Gets an existing header value or returns a default.
-     * Handles converting number header values to strings since HTTP headers must be strings.
-     * Note: This returns string | string[] since some headers can have multiple values.
-     * For headers that must always be a single string (like Content-Type), use the
-     * specialized _getExistingOrDefaultContentTypeHeader method instead.
-     */
-    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys(this.requestOptions.headers)[header];
-            if (headerValue) {
-                clientHeader =
-                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
-            }
-        }
-        const additionalValue = additionalHeaders[header];
-        if (additionalValue !== undefined) {
-            return typeof additionalValue === 'number'
-                ? additionalValue.toString()
-                : additionalValue;
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    /**
-     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
-     * Always returns a single string (not an array) since Content-Type should be a single value.
-     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
-     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
-     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
-     */
-    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys(this.requestOptions.headers)[Headers.ContentType];
-            if (headerValue) {
-                if (typeof headerValue === 'number') {
-                    clientHeader = String(headerValue);
-                }
-                else if (Array.isArray(headerValue)) {
-                    clientHeader = headerValue.join(', ');
-                }
-                else {
-                    clientHeader = headerValue;
-                }
-            }
-        }
-        const additionalValue = additionalHeaders[Headers.ContentType];
-        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
-        if (additionalValue !== undefined) {
-            if (typeof additionalValue === 'number') {
-                return String(additionalValue);
-            }
-            else if (Array.isArray(additionalValue)) {
-                return additionalValue.join(', ');
-            }
-            else {
-                return additionalValue;
-            }
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    _getAgent(parsedUrl) {
-        let agent;
-        const proxyUrl = getProxyUrl(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (this._keepAlive && useProxy) {
-            agent = this._proxyAgent;
-        }
-        if (!useProxy) {
-            agent = this._agent;
-        }
-        // if agent is already assigned use that agent.
-        if (agent) {
-            return agent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        let maxSockets = 100;
-        if (this.requestOptions) {
-            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
-        }
-        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
-        if (proxyUrl && proxyUrl.hostname) {
-            const agentOptions = {
-                maxSockets,
-                keepAlive: this._keepAlive,
-                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
-                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
-                })), { host: proxyUrl.hostname, port: proxyUrl.port })
-            };
-            let tunnelAgent;
-            const overHttps = proxyUrl.protocol === 'https:';
-            if (usingSsl) {
-                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
-            }
-            else {
-                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
-            }
-            agent = tunnelAgent(agentOptions);
-            this._proxyAgent = agent;
-        }
-        // if tunneling agent isn't assigned create a new agent
-        if (!agent) {
-            const options = { keepAlive: this._keepAlive, maxSockets };
-            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
-            this._agent = agent;
-        }
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            agent.options = Object.assign(agent.options || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return agent;
-    }
-    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
-        let proxyAgent;
-        if (this._keepAlive) {
-            proxyAgent = this._proxyAgentDispatcher;
-        }
-        // if agent is already assigned use that agent.
-        if (proxyAgent) {
-            return proxyAgent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
-            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
-        })));
-        this._proxyAgentDispatcher = proxyAgent;
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return proxyAgent;
-    }
-    _getUserAgentWithOrchestrationId(userAgent) {
-        const baseUserAgent = userAgent || 'actions/http-client';
-        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
-        if (orchId) {
-            // Sanitize the orchestration ID to ensure it contains only valid characters
-            // Valid characters: 0-9, a-z, _, -, .
-            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
-            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
-        }
-        return baseUserAgent;
-    }
-    _performExponentialBackoff(retryNumber) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
-            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-            return new Promise(resolve => setTimeout(() => resolve(), ms));
-        });
-    }
-    _processResponse(res, options) {
-        return __awaiter$2(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => __awaiter$2(this, void 0, void 0, function* () {
-                const statusCode = res.message.statusCode || 0;
-                const response = {
-                    statusCode,
-                    result: null,
-                    headers: {}
-                };
-                // not found leads to null obj returned
-                if (statusCode === HttpCodes.NotFound) {
-                    resolve(response);
-                }
-                // get the result from the body
-                function dateTimeDeserializer(key, value) {
-                    if (typeof value === 'string') {
-                        const a = new Date(value);
-                        if (!isNaN(a.valueOf())) {
-                            return a;
-                        }
-                    }
-                    return value;
-                }
-                let obj;
-                let contents;
-                try {
-                    contents = yield res.readBody();
-                    if (contents && contents.length > 0) {
-                        if (options && options.deserializeDates) {
-                            obj = JSON.parse(contents, dateTimeDeserializer);
-                        }
-                        else {
-                            obj = JSON.parse(contents);
-                        }
-                        response.result = obj;
-                    }
-                    response.headers = res.message.headers;
-                }
-                catch (err) {
-                    // Invalid resource (contents not json);  leaving result obj null
-                }
-                // note that 3xx redirects are handled by the http layer.
-                if (statusCode > 299) {
-                    let msg;
-                    // if exception/error in body, attempt to get better error
-                    if (obj && obj.message) {
-                        msg = obj.message;
-                    }
-                    else if (contents && contents.length > 0) {
-                        // it may be the case that the exception is in the body message as string
-                        msg = contents;
-                    }
-                    else {
-                        msg = `Failed request: (${statusCode})`;
-                    }
-                    const err = new HttpClientError(msg, statusCode);
-                    err.result = response.result;
-                    reject(err);
-                }
-                else {
-                    resolve(response);
-                }
-            }));
-        });
-    }
-}
-const lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
-
 var __awaiter$1 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -42515,7 +42786,7 @@ const IQ_CLI_JAR = 'sonatype-iq-cli.jar';
 const IQ_VERSION_TO_COMPLETE = '1.{iq-cli-version}.0-01';
 const DOWNLOAD_URL = 'https://download.sonatype.com/clm/scanner/nexus-iq-cli-{iq-cli-version}.jar';
 const MINIMUM_SUPPORTED_IQ_VERSION = 137;
-const LATEST_IQ_CLI_VERSION = '2.13.2-01';
+const LATEST_IQ_CLI_VERSION = '2.14.0-01';
 const INPUT_IQ_CLI_VERSION = 'iq-cli-version';
 const INPUT_IQ_CLI_DOWNLOAD_URL = 'iq-cli-download-url';
 const INPUT_IQ_CLI_DOWNLOAD_AUTH = 'iq-cli-download-auth';
@@ -42523,6 +42794,8 @@ const INPUT_USERNAME = 'username';
 const INPUT_PASSWORD = 'password';
 const INPUT_APPLICATION_ID = 'application-id';
 const INPUT_IQ_SERVER_URL = 'iq-server-url';
+const INPUT_PROXY = 'proxy';
+const INPUT_PROXY_USER = 'proxy-user';
 
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
@@ -42623,6 +42896,10 @@ function validateDownloadUrl(url) {
 }
 
 var data = [
+	{
+		version: "2.14.0-01",
+		sha1: "506081c82bd30bd4ee44d2c227ee25b033bbb4c9"
+	},
 	{
 		version: "2.13.2-01",
 		sha1: "72e56dc6a3b6a0898ed68b5775460b15f32c3750"
@@ -60354,20 +60631,20 @@ function requireSrc () {
 	return src;
 }
 
-var parseProxyResponse = {};
+var parseProxyResponse$1 = {};
 
-var hasRequiredParseProxyResponse;
+var hasRequiredParseProxyResponse$1;
 
-function requireParseProxyResponse () {
-	if (hasRequiredParseProxyResponse) return parseProxyResponse;
-	hasRequiredParseProxyResponse = 1;
-	var __importDefault = (parseProxyResponse && parseProxyResponse.__importDefault) || function (mod) {
+function requireParseProxyResponse$1 () {
+	if (hasRequiredParseProxyResponse$1) return parseProxyResponse$1;
+	hasRequiredParseProxyResponse$1 = 1;
+	var __importDefault = (parseProxyResponse$1 && parseProxyResponse$1.__importDefault) || function (mod) {
 	    return (mod && mod.__esModule) ? mod : { "default": mod };
 	};
-	Object.defineProperty(parseProxyResponse, "__esModule", { value: true });
+	Object.defineProperty(parseProxyResponse$1, "__esModule", { value: true });
 	const debug_1 = __importDefault(requireSrc$1());
 	const debug = debug_1.default('https-proxy-agent:parse-proxy-response');
-	function parseProxyResponse$1(socket) {
+	function parseProxyResponse(socket) {
 	    return new Promise((resolve, reject) => {
 	        // we need to buffer any HTTP traffic that happens with the proxy before we get
 	        // the CONNECT response, so that if the response is anything other than an "200"
@@ -60424,9 +60701,9 @@ function requireParseProxyResponse () {
 	        read();
 	    });
 	}
-	parseProxyResponse.default = parseProxyResponse$1;
+	parseProxyResponse$1.default = parseProxyResponse;
 	
-	return parseProxyResponse;
+	return parseProxyResponse$1;
 }
 
 var hasRequiredAgent;
@@ -60453,7 +60730,7 @@ function requireAgent () {
 	const assert_1 = __importDefault(require$$5$1);
 	const debug_1 = __importDefault(requireSrc$1());
 	const agent_base_1 = requireSrc();
-	const parse_proxy_response_1 = __importDefault(requireParseProxyResponse());
+	const parse_proxy_response_1 = __importDefault(requireParseProxyResponse$1());
 	const debug = debug_1.default('https-proxy-agent:agent');
 	/**
 	 * The `HttpsProxyAgent` implements an HTTP Agent subclass that connects to
@@ -60613,13 +60890,13 @@ function requireAgent () {
 	return agent;
 }
 
-var dist;
-var hasRequiredDist;
+var dist$3;
+var hasRequiredDist$3;
 
-function requireDist () {
-	if (hasRequiredDist) return dist;
-	hasRequiredDist = 1;
-	var __importDefault = (dist && dist.__importDefault) || function (mod) {
+function requireDist$3 () {
+	if (hasRequiredDist$3) return dist$3;
+	hasRequiredDist$3 = 1;
+	var __importDefault = (dist$3 && dist$3.__importDefault) || function (mod) {
 	    return (mod && mod.__esModule) ? mod : { "default": mod };
 	};
 	const agent_1 = __importDefault(requireAgent());
@@ -60630,13 +60907,13 @@ function requireDist () {
 	    createHttpsProxyAgent.HttpsProxyAgent = agent_1.default;
 	    createHttpsProxyAgent.prototype = agent_1.default.prototype;
 	})(createHttpsProxyAgent || (createHttpsProxyAgent = {}));
-	dist = createHttpsProxyAgent;
+	dist$3 = createHttpsProxyAgent;
 	
-	return dist;
+	return dist$3;
 }
 
-var distExports = requireDist();
-var HttpsProxyAgent = /*@__PURE__*/getDefaultExportFromCjs(distExports);
+var distExports$2 = requireDist$3();
+var HttpsProxyAgent = /*@__PURE__*/getDefaultExportFromCjs(distExports$2);
 
 var followRedirects$1 = {exports: {}};
 
@@ -65859,6 +66136,755 @@ const {
   create,
 } = axios;
 
+var dist$2 = {};
+
+var dist$1 = {};
+
+var helpers = {};
+
+var hasRequiredHelpers;
+
+function requireHelpers () {
+	if (hasRequiredHelpers) return helpers;
+	hasRequiredHelpers = 1;
+	var __createBinding = (helpers && helpers.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    var desc = Object.getOwnPropertyDescriptor(m, k);
+	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+	      desc = { enumerable: true, get: function() { return m[k]; } };
+	    }
+	    Object.defineProperty(o, k2, desc);
+	}) : (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    o[k2] = m[k];
+	}));
+	var __setModuleDefault = (helpers && helpers.__setModuleDefault) || (Object.create ? (function(o, v) {
+	    Object.defineProperty(o, "default", { enumerable: true, value: v });
+	}) : function(o, v) {
+	    o["default"] = v;
+	});
+	var __importStar = (helpers && helpers.__importStar) || function (mod) {
+	    if (mod && mod.__esModule) return mod;
+	    var result = {};
+	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+	    __setModuleDefault(result, mod);
+	    return result;
+	};
+	Object.defineProperty(helpers, "__esModule", { value: true });
+	helpers.req = helpers.json = helpers.toBuffer = void 0;
+	const http = __importStar(http__default);
+	const https = __importStar(https__default);
+	async function toBuffer(stream) {
+	    let length = 0;
+	    const chunks = [];
+	    for await (const chunk of stream) {
+	        length += chunk.length;
+	        chunks.push(chunk);
+	    }
+	    return Buffer.concat(chunks, length);
+	}
+	helpers.toBuffer = toBuffer;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	async function json(stream) {
+	    const buf = await toBuffer(stream);
+	    const str = buf.toString('utf8');
+	    try {
+	        return JSON.parse(str);
+	    }
+	    catch (_err) {
+	        const err = _err;
+	        err.message += ` (input: ${str})`;
+	        throw err;
+	    }
+	}
+	helpers.json = json;
+	function req(url, opts = {}) {
+	    const href = typeof url === 'string' ? url : url.href;
+	    const req = (href.startsWith('https:') ? https : http).request(url, opts);
+	    const promise = new Promise((resolve, reject) => {
+	        req
+	            .once('response', resolve)
+	            .once('error', reject)
+	            .end();
+	    });
+	    req.then = promise.then.bind(promise);
+	    return req;
+	}
+	helpers.req = req;
+	
+	return helpers;
+}
+
+var hasRequiredDist$2;
+
+function requireDist$2 () {
+	if (hasRequiredDist$2) return dist$1;
+	hasRequiredDist$2 = 1;
+	(function (exports) {
+		var __createBinding = (dist$1 && dist$1.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+		    if (k2 === undefined) k2 = k;
+		    var desc = Object.getOwnPropertyDescriptor(m, k);
+		    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+		      desc = { enumerable: true, get: function() { return m[k]; } };
+		    }
+		    Object.defineProperty(o, k2, desc);
+		}) : (function(o, m, k, k2) {
+		    if (k2 === undefined) k2 = k;
+		    o[k2] = m[k];
+		}));
+		var __setModuleDefault = (dist$1 && dist$1.__setModuleDefault) || (Object.create ? (function(o, v) {
+		    Object.defineProperty(o, "default", { enumerable: true, value: v });
+		}) : function(o, v) {
+		    o["default"] = v;
+		});
+		var __importStar = (dist$1 && dist$1.__importStar) || function (mod) {
+		    if (mod && mod.__esModule) return mod;
+		    var result = {};
+		    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+		    __setModuleDefault(result, mod);
+		    return result;
+		};
+		var __exportStar = (dist$1 && dist$1.__exportStar) || function(m, exports) {
+		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+		};
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.Agent = void 0;
+		const net = __importStar(require$$0$1);
+		const http = __importStar(http__default);
+		const https_1 = https__default;
+		__exportStar(requireHelpers(), exports);
+		const INTERNAL = Symbol('AgentBaseInternalState');
+		class Agent extends http.Agent {
+		    constructor(opts) {
+		        super(opts);
+		        this[INTERNAL] = {};
+		    }
+		    /**
+		     * Determine whether this is an `http` or `https` request.
+		     */
+		    isSecureEndpoint(options) {
+		        if (options) {
+		            // First check the `secureEndpoint` property explicitly, since this
+		            // means that a parent `Agent` is "passing through" to this instance.
+		            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		            if (typeof options.secureEndpoint === 'boolean') {
+		                return options.secureEndpoint;
+		            }
+		            // If no explicit `secure` endpoint, check if `protocol` property is
+		            // set. This will usually be the case since using a full string URL
+		            // or `URL` instance should be the most common usage.
+		            if (typeof options.protocol === 'string') {
+		                return options.protocol === 'https:';
+		            }
+		        }
+		        // Finally, if no `protocol` property was set, then fall back to
+		        // checking the stack trace of the current call stack, and try to
+		        // detect the "https" module.
+		        const { stack } = new Error();
+		        if (typeof stack !== 'string')
+		            return false;
+		        return stack
+		            .split('\n')
+		            .some((l) => l.indexOf('(https.js:') !== -1 ||
+		            l.indexOf('node:https:') !== -1);
+		    }
+		    // In order to support async signatures in `connect()` and Node's native
+		    // connection pooling in `http.Agent`, the array of sockets for each origin
+		    // has to be updated synchronously. This is so the length of the array is
+		    // accurate when `addRequest()` is next called. We achieve this by creating a
+		    // fake socket and adding it to `sockets[origin]` and incrementing
+		    // `totalSocketCount`.
+		    incrementSockets(name) {
+		        // If `maxSockets` and `maxTotalSockets` are both Infinity then there is no
+		        // need to create a fake socket because Node.js native connection pooling
+		        // will never be invoked.
+		        if (this.maxSockets === Infinity && this.maxTotalSockets === Infinity) {
+		            return null;
+		        }
+		        // All instances of `sockets` are expected TypeScript errors. The
+		        // alternative is to add it as a private property of this class but that
+		        // will break TypeScript subclassing.
+		        if (!this.sockets[name]) {
+		            // @ts-expect-error `sockets` is readonly in `@types/node`
+		            this.sockets[name] = [];
+		        }
+		        const fakeSocket = new net.Socket({ writable: false });
+		        this.sockets[name].push(fakeSocket);
+		        // @ts-expect-error `totalSocketCount` isn't defined in `@types/node`
+		        this.totalSocketCount++;
+		        return fakeSocket;
+		    }
+		    decrementSockets(name, socket) {
+		        if (!this.sockets[name] || socket === null) {
+		            return;
+		        }
+		        const sockets = this.sockets[name];
+		        const index = sockets.indexOf(socket);
+		        if (index !== -1) {
+		            sockets.splice(index, 1);
+		            // @ts-expect-error  `totalSocketCount` isn't defined in `@types/node`
+		            this.totalSocketCount--;
+		            if (sockets.length === 0) {
+		                // @ts-expect-error `sockets` is readonly in `@types/node`
+		                delete this.sockets[name];
+		            }
+		        }
+		    }
+		    // In order to properly update the socket pool, we need to call `getName()` on
+		    // the core `https.Agent` if it is a secureEndpoint.
+		    getName(options) {
+		        const secureEndpoint = this.isSecureEndpoint(options);
+		        if (secureEndpoint) {
+		            // @ts-expect-error `getName()` isn't defined in `@types/node`
+		            return https_1.Agent.prototype.getName.call(this, options);
+		        }
+		        // @ts-expect-error `getName()` isn't defined in `@types/node`
+		        return super.getName(options);
+		    }
+		    createSocket(req, options, cb) {
+		        const connectOpts = {
+		            ...options,
+		            secureEndpoint: this.isSecureEndpoint(options),
+		        };
+		        const name = this.getName(connectOpts);
+		        const fakeSocket = this.incrementSockets(name);
+		        Promise.resolve()
+		            .then(() => this.connect(req, connectOpts))
+		            .then((socket) => {
+		            this.decrementSockets(name, fakeSocket);
+		            if (socket instanceof http.Agent) {
+		                try {
+		                    // @ts-expect-error `addRequest()` isn't defined in `@types/node`
+		                    return socket.addRequest(req, connectOpts);
+		                }
+		                catch (err) {
+		                    return cb(err);
+		                }
+		            }
+		            this[INTERNAL].currentSocket = socket;
+		            // @ts-expect-error `createSocket()` isn't defined in `@types/node`
+		            super.createSocket(req, options, cb);
+		        }, (err) => {
+		            this.decrementSockets(name, fakeSocket);
+		            cb(err);
+		        });
+		    }
+		    createConnection() {
+		        const socket = this[INTERNAL].currentSocket;
+		        this[INTERNAL].currentSocket = undefined;
+		        if (!socket) {
+		            throw new Error('No socket was returned in the `connect()` function');
+		        }
+		        return socket;
+		    }
+		    get defaultPort() {
+		        return (this[INTERNAL].defaultPort ??
+		            (this.protocol === 'https:' ? 443 : 80));
+		    }
+		    set defaultPort(v) {
+		        if (this[INTERNAL]) {
+		            this[INTERNAL].defaultPort = v;
+		        }
+		    }
+		    get protocol() {
+		        return (this[INTERNAL].protocol ??
+		            (this.isSecureEndpoint() ? 'https:' : 'http:'));
+		    }
+		    set protocol(v) {
+		        if (this[INTERNAL]) {
+		            this[INTERNAL].protocol = v;
+		        }
+		    }
+		}
+		exports.Agent = Agent;
+		
+	} (dist$1));
+	return dist$1;
+}
+
+var hasRequiredDist$1;
+
+function requireDist$1 () {
+	if (hasRequiredDist$1) return dist$2;
+	hasRequiredDist$1 = 1;
+	var __createBinding = (dist$2 && dist$2.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    var desc = Object.getOwnPropertyDescriptor(m, k);
+	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+	      desc = { enumerable: true, get: function() { return m[k]; } };
+	    }
+	    Object.defineProperty(o, k2, desc);
+	}) : (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    o[k2] = m[k];
+	}));
+	var __setModuleDefault = (dist$2 && dist$2.__setModuleDefault) || (Object.create ? (function(o, v) {
+	    Object.defineProperty(o, "default", { enumerable: true, value: v });
+	}) : function(o, v) {
+	    o["default"] = v;
+	});
+	var __importStar = (dist$2 && dist$2.__importStar) || function (mod) {
+	    if (mod && mod.__esModule) return mod;
+	    var result = {};
+	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+	    __setModuleDefault(result, mod);
+	    return result;
+	};
+	var __importDefault = (dist$2 && dist$2.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(dist$2, "__esModule", { value: true });
+	dist$2.HttpProxyAgent = void 0;
+	const net = __importStar(require$$0$1);
+	const tls = __importStar(require$$1);
+	const debug_1 = __importDefault(requireSrc$1());
+	const events_1 = events$1;
+	const agent_base_1 = requireDist$2();
+	const url_1 = require$$5;
+	const debug = (0, debug_1.default)('http-proxy-agent');
+	/**
+	 * The `HttpProxyAgent` implements an HTTP Agent subclass that connects
+	 * to the specified "HTTP proxy server" in order to proxy HTTP requests.
+	 */
+	class HttpProxyAgent extends agent_base_1.Agent {
+	    constructor(proxy, opts) {
+	        super(opts);
+	        this.proxy = typeof proxy === 'string' ? new url_1.URL(proxy) : proxy;
+	        this.proxyHeaders = opts?.headers ?? {};
+	        debug('Creating new HttpProxyAgent instance: %o', this.proxy.href);
+	        // Trim off the brackets from IPv6 addresses
+	        const host = (this.proxy.hostname || this.proxy.host).replace(/^\[|\]$/g, '');
+	        const port = this.proxy.port
+	            ? parseInt(this.proxy.port, 10)
+	            : this.proxy.protocol === 'https:'
+	                ? 443
+	                : 80;
+	        this.connectOpts = {
+	            ...(opts ? omit(opts, 'headers') : null),
+	            host,
+	            port,
+	        };
+	    }
+	    addRequest(req, opts) {
+	        req._header = null;
+	        this.setRequestProps(req, opts);
+	        // @ts-expect-error `addRequest()` isn't defined in `@types/node`
+	        super.addRequest(req, opts);
+	    }
+	    setRequestProps(req, opts) {
+	        const { proxy } = this;
+	        const protocol = opts.secureEndpoint ? 'https:' : 'http:';
+	        const hostname = req.getHeader('host') || 'localhost';
+	        const base = `${protocol}//${hostname}`;
+	        const url = new url_1.URL(req.path, base);
+	        if (opts.port !== 80) {
+	            url.port = String(opts.port);
+	        }
+	        // Change the `http.ClientRequest` instance's "path" field
+	        // to the absolute path of the URL that will be requested.
+	        req.path = String(url);
+	        // Inject the `Proxy-Authorization` header if necessary.
+	        const headers = typeof this.proxyHeaders === 'function'
+	            ? this.proxyHeaders()
+	            : { ...this.proxyHeaders };
+	        if (proxy.username || proxy.password) {
+	            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+	            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
+	        }
+	        if (!headers['Proxy-Connection']) {
+	            headers['Proxy-Connection'] = this.keepAlive
+	                ? 'Keep-Alive'
+	                : 'close';
+	        }
+	        for (const name of Object.keys(headers)) {
+	            const value = headers[name];
+	            if (value) {
+	                req.setHeader(name, value);
+	            }
+	        }
+	    }
+	    async connect(req, opts) {
+	        req._header = null;
+	        if (!req.path.includes('://')) {
+	            this.setRequestProps(req, opts);
+	        }
+	        // At this point, the http ClientRequest's internal `_header` field
+	        // might have already been set. If this is the case then we'll need
+	        // to re-generate the string since we just changed the `req.path`.
+	        let first;
+	        let endOfHeaders;
+	        debug('Regenerating stored HTTP header string for request');
+	        req._implicitHeader();
+	        if (req.outputData && req.outputData.length > 0) {
+	            debug('Patching connection write() output buffer with updated header');
+	            first = req.outputData[0].data;
+	            endOfHeaders = first.indexOf('\r\n\r\n') + 4;
+	            req.outputData[0].data =
+	                req._header + first.substring(endOfHeaders);
+	            debug('Output buffer: %o', req.outputData[0].data);
+	        }
+	        // Create a socket connection to the proxy server.
+	        let socket;
+	        if (this.proxy.protocol === 'https:') {
+	            debug('Creating `tls.Socket`: %o', this.connectOpts);
+	            socket = tls.connect(this.connectOpts);
+	        }
+	        else {
+	            debug('Creating `net.Socket`: %o', this.connectOpts);
+	            socket = net.connect(this.connectOpts);
+	        }
+	        // Wait for the socket's `connect` event, so that this `callback()`
+	        // function throws instead of the `http` request machinery. This is
+	        // important for i.e. `PacProxyAgent` which determines a failed proxy
+	        // connection via the `callback()` function throwing.
+	        await (0, events_1.once)(socket, 'connect');
+	        return socket;
+	    }
+	}
+	HttpProxyAgent.protocols = ['http', 'https'];
+	dist$2.HttpProxyAgent = HttpProxyAgent;
+	function omit(obj, ...keys) {
+	    const ret = {};
+	    let key;
+	    for (key in obj) {
+	        if (!keys.includes(key)) {
+	            ret[key] = obj[key];
+	        }
+	    }
+	    return ret;
+	}
+	
+	return dist$2;
+}
+
+var distExports$1 = requireDist$1();
+
+var dist = {};
+
+var parseProxyResponse = {};
+
+var hasRequiredParseProxyResponse;
+
+function requireParseProxyResponse () {
+	if (hasRequiredParseProxyResponse) return parseProxyResponse;
+	hasRequiredParseProxyResponse = 1;
+	var __importDefault = (parseProxyResponse && parseProxyResponse.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(parseProxyResponse, "__esModule", { value: true });
+	parseProxyResponse.parseProxyResponse = void 0;
+	const debug_1 = __importDefault(requireSrc$1());
+	const debug = (0, debug_1.default)('https-proxy-agent:parse-proxy-response');
+	function parseProxyResponse$1(socket) {
+	    return new Promise((resolve, reject) => {
+	        // we need to buffer any HTTP traffic that happens with the proxy before we get
+	        // the CONNECT response, so that if the response is anything other than an "200"
+	        // response code, then we can re-play the "data" events on the socket once the
+	        // HTTP parser is hooked up...
+	        let buffersLength = 0;
+	        const buffers = [];
+	        function read() {
+	            const b = socket.read();
+	            if (b)
+	                ondata(b);
+	            else
+	                socket.once('readable', read);
+	        }
+	        function cleanup() {
+	            socket.removeListener('end', onend);
+	            socket.removeListener('error', onerror);
+	            socket.removeListener('readable', read);
+	        }
+	        function onend() {
+	            cleanup();
+	            debug('onend');
+	            reject(new Error('Proxy connection ended before receiving CONNECT response'));
+	        }
+	        function onerror(err) {
+	            cleanup();
+	            debug('onerror %o', err);
+	            reject(err);
+	        }
+	        function ondata(b) {
+	            buffers.push(b);
+	            buffersLength += b.length;
+	            const buffered = Buffer.concat(buffers, buffersLength);
+	            const endOfHeaders = buffered.indexOf('\r\n\r\n');
+	            if (endOfHeaders === -1) {
+	                // keep buffering
+	                debug('have not received end of HTTP headers yet...');
+	                read();
+	                return;
+	            }
+	            const headerParts = buffered
+	                .slice(0, endOfHeaders)
+	                .toString('ascii')
+	                .split('\r\n');
+	            const firstLine = headerParts.shift();
+	            if (!firstLine) {
+	                socket.destroy();
+	                return reject(new Error('No header received from proxy CONNECT response'));
+	            }
+	            const firstLineParts = firstLine.split(' ');
+	            const statusCode = +firstLineParts[1];
+	            const statusText = firstLineParts.slice(2).join(' ');
+	            const headers = {};
+	            for (const header of headerParts) {
+	                if (!header)
+	                    continue;
+	                const firstColon = header.indexOf(':');
+	                if (firstColon === -1) {
+	                    socket.destroy();
+	                    return reject(new Error(`Invalid header from proxy CONNECT response: "${header}"`));
+	                }
+	                const key = header.slice(0, firstColon).toLowerCase();
+	                const value = header.slice(firstColon + 1).trimStart();
+	                const current = headers[key];
+	                if (typeof current === 'string') {
+	                    headers[key] = [current, value];
+	                }
+	                else if (Array.isArray(current)) {
+	                    current.push(value);
+	                }
+	                else {
+	                    headers[key] = value;
+	                }
+	            }
+	            debug('got proxy server response: %o %o', firstLine, headers);
+	            cleanup();
+	            resolve({
+	                connect: {
+	                    statusCode,
+	                    statusText,
+	                    headers,
+	                },
+	                buffered,
+	            });
+	        }
+	        socket.on('error', onerror);
+	        socket.on('end', onend);
+	        read();
+	    });
+	}
+	parseProxyResponse.parseProxyResponse = parseProxyResponse$1;
+	
+	return parseProxyResponse;
+}
+
+var hasRequiredDist;
+
+function requireDist () {
+	if (hasRequiredDist) return dist;
+	hasRequiredDist = 1;
+	var __createBinding = (dist && dist.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    var desc = Object.getOwnPropertyDescriptor(m, k);
+	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+	      desc = { enumerable: true, get: function() { return m[k]; } };
+	    }
+	    Object.defineProperty(o, k2, desc);
+	}) : (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    o[k2] = m[k];
+	}));
+	var __setModuleDefault = (dist && dist.__setModuleDefault) || (Object.create ? (function(o, v) {
+	    Object.defineProperty(o, "default", { enumerable: true, value: v });
+	}) : function(o, v) {
+	    o["default"] = v;
+	});
+	var __importStar = (dist && dist.__importStar) || function (mod) {
+	    if (mod && mod.__esModule) return mod;
+	    var result = {};
+	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+	    __setModuleDefault(result, mod);
+	    return result;
+	};
+	var __importDefault = (dist && dist.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(dist, "__esModule", { value: true });
+	dist.HttpsProxyAgent = void 0;
+	const net = __importStar(require$$0$1);
+	const tls = __importStar(require$$1);
+	const assert_1 = __importDefault(require$$5$1);
+	const debug_1 = __importDefault(requireSrc$1());
+	const agent_base_1 = requireDist$2();
+	const url_1 = require$$5;
+	const parse_proxy_response_1 = requireParseProxyResponse();
+	const debug = (0, debug_1.default)('https-proxy-agent');
+	const setServernameFromNonIpHost = (options) => {
+	    if (options.servername === undefined &&
+	        options.host &&
+	        !net.isIP(options.host)) {
+	        return {
+	            ...options,
+	            servername: options.host,
+	        };
+	    }
+	    return options;
+	};
+	/**
+	 * The `HttpsProxyAgent` implements an HTTP Agent subclass that connects to
+	 * the specified "HTTP(s) proxy server" in order to proxy HTTPS requests.
+	 *
+	 * Outgoing HTTP requests are first tunneled through the proxy server using the
+	 * `CONNECT` HTTP request method to establish a connection to the proxy server,
+	 * and then the proxy server connects to the destination target and issues the
+	 * HTTP request from the proxy server.
+	 *
+	 * `https:` requests have their socket connection upgraded to TLS once
+	 * the connection to the proxy server has been established.
+	 */
+	class HttpsProxyAgent extends agent_base_1.Agent {
+	    constructor(proxy, opts) {
+	        super(opts);
+	        this.options = { path: undefined };
+	        this.proxy = typeof proxy === 'string' ? new url_1.URL(proxy) : proxy;
+	        this.proxyHeaders = opts?.headers ?? {};
+	        debug('Creating new HttpsProxyAgent instance: %o', this.proxy.href);
+	        // Trim off the brackets from IPv6 addresses
+	        const host = (this.proxy.hostname || this.proxy.host).replace(/^\[|\]$/g, '');
+	        const port = this.proxy.port
+	            ? parseInt(this.proxy.port, 10)
+	            : this.proxy.protocol === 'https:'
+	                ? 443
+	                : 80;
+	        this.connectOpts = {
+	            // Attempt to negotiate http/1.1 for proxy servers that support http/2
+	            ALPNProtocols: ['http/1.1'],
+	            ...(opts ? omit(opts, 'headers') : null),
+	            host,
+	            port,
+	        };
+	    }
+	    /**
+	     * Called when the node-core HTTP client library is creating a
+	     * new HTTP request.
+	     */
+	    async connect(req, opts) {
+	        const { proxy } = this;
+	        if (!opts.host) {
+	            throw new TypeError('No "host" provided');
+	        }
+	        // Create a socket connection to the proxy server.
+	        let socket;
+	        if (proxy.protocol === 'https:') {
+	            debug('Creating `tls.Socket`: %o', this.connectOpts);
+	            socket = tls.connect(setServernameFromNonIpHost(this.connectOpts));
+	        }
+	        else {
+	            debug('Creating `net.Socket`: %o', this.connectOpts);
+	            socket = net.connect(this.connectOpts);
+	        }
+	        const headers = typeof this.proxyHeaders === 'function'
+	            ? this.proxyHeaders()
+	            : { ...this.proxyHeaders };
+	        const host = net.isIPv6(opts.host) ? `[${opts.host}]` : opts.host;
+	        let payload = `CONNECT ${host}:${opts.port} HTTP/1.1\r\n`;
+	        // Inject the `Proxy-Authorization` header if necessary.
+	        if (proxy.username || proxy.password) {
+	            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+	            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
+	        }
+	        headers.Host = `${host}:${opts.port}`;
+	        if (!headers['Proxy-Connection']) {
+	            headers['Proxy-Connection'] = this.keepAlive
+	                ? 'Keep-Alive'
+	                : 'close';
+	        }
+	        for (const name of Object.keys(headers)) {
+	            payload += `${name}: ${headers[name]}\r\n`;
+	        }
+	        const proxyResponsePromise = (0, parse_proxy_response_1.parseProxyResponse)(socket);
+	        socket.write(`${payload}\r\n`);
+	        const { connect, buffered } = await proxyResponsePromise;
+	        req.emit('proxyConnect', connect);
+	        this.emit('proxyConnect', connect, req);
+	        if (connect.statusCode === 200) {
+	            req.once('socket', resume);
+	            if (opts.secureEndpoint) {
+	                // The proxy is connecting to a TLS server, so upgrade
+	                // this socket connection to a TLS connection.
+	                debug('Upgrading socket connection to TLS');
+	                return tls.connect({
+	                    ...omit(setServernameFromNonIpHost(opts), 'host', 'path', 'port'),
+	                    socket,
+	                });
+	            }
+	            return socket;
+	        }
+	        // Some other status code that's not 200... need to re-play the HTTP
+	        // header "data" events onto the socket once the HTTP machinery is
+	        // attached so that the node core `http` can parse and handle the
+	        // error status code.
+	        // Close the original socket, and a new "fake" socket is returned
+	        // instead, so that the proxy doesn't get the HTTP request
+	        // written to it (which may contain `Authorization` headers or other
+	        // sensitive data).
+	        //
+	        // See: https://hackerone.com/reports/541502
+	        socket.destroy();
+	        const fakeSocket = new net.Socket({ writable: false });
+	        fakeSocket.readable = true;
+	        // Need to wait for the "socket" event to re-play the "data" events.
+	        req.once('socket', (s) => {
+	            debug('Replaying proxy buffer for failed request');
+	            (0, assert_1.default)(s.listenerCount('data') > 0);
+	            // Replay the "buffered" Buffer onto the fake `socket`, since at
+	            // this point the HTTP module machinery has been hooked up for
+	            // the user.
+	            s.push(buffered);
+	            s.push(null);
+	        });
+	        return fakeSocket;
+	    }
+	}
+	HttpsProxyAgent.protocols = ['http', 'https'];
+	dist.HttpsProxyAgent = HttpsProxyAgent;
+	function resume(socket) {
+	    socket.resume();
+	}
+	function omit(obj, ...keys) {
+	    const ret = {};
+	    let key;
+	    for (key in obj) {
+	        if (!keys.includes(key)) {
+	            ret[key] = obj[key];
+	        }
+	    }
+	    return ret;
+	}
+	
+	return dist;
+}
+
+var distExports = requireDist();
+
+/*
+ *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
+ *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
+ *  "Sonatype" is a trademark of Sonatype, Inc.
+ */
+// proxy is host[:port] (no scheme) and proxyUser is username:password, matching the format
+// already used for the IQ CLI's own --proxy/--proxy-user flags (see cli-command-builder.ts).
+function getProxyAgents(proxy, proxyUser) {
+    if (!proxy) {
+        return undefined;
+    }
+    const proxyUrl = new URL(`http://${proxy}`);
+    if (proxyUser) {
+        const [user, pass] = proxyUser.split(':');
+        proxyUrl.username = encodeURIComponent(user ?? '');
+        proxyUrl.password = encodeURIComponent(pass ?? '');
+    }
+    const urlString = proxyUrl.toString();
+    return {
+        httpAgent: new distExports$1.HttpProxyAgent(urlString),
+        httpsAgent: new distExports.HttpsProxyAgent(urlString),
+        proxy: false
+    };
+}
+
 /*
  *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
@@ -65868,6 +66894,8 @@ class IqClientBuilder {
     iqServerUrl;
     username;
     password;
+    proxy;
+    proxyUser;
     withUrl(iqServerUrl) {
         this.iqServerUrl = iqServerUrl;
         return this;
@@ -65880,24 +66908,36 @@ class IqClientBuilder {
         this.password = password;
         return this;
     }
+    withProxy(proxy) {
+        this.proxy = proxy;
+        return this;
+    }
+    withProxyUser(proxyUser) {
+        this.proxyUser = proxyUser;
+        return this;
+    }
     build() {
         if (!this.iqServerUrl || !this.username || !this.password) {
             throw new Error('IqClientBuilder: Missing required parameters');
         }
-        return new IqClient(this.iqServerUrl, this.username, this.password);
+        return new IqClient(this.iqServerUrl, this.username, this.password, this.proxy, this.proxyUser);
     }
 }
 class IqClient {
     iqServerUrl;
     username;
     password;
-    constructor(serverUrl, username, password) {
+    proxy;
+    proxyUser;
+    constructor(serverUrl, username, password, proxy, proxyUser) {
         this.iqServerUrl = serverUrl;
         if (this.iqServerUrl.endsWith('/')) {
             this.iqServerUrl = this.iqServerUrl.substring(0, this.iqServerUrl.length - 1);
         }
         this.username = username;
         this.password = password;
+        this.proxy = proxy;
+        this.proxyUser = proxyUser;
     }
     async fetchVulnerabilityDetails(vulnerabilityId) {
         debug(`Fetching vulnerability details for: ${vulnerabilityId}`);
@@ -65918,9 +66958,10 @@ class IqClient {
         debug(`Fetching application internal ID for application ID: ${applicationPublicId}`);
         const url = `${this.iqServerUrl}/api/v2/applications?publicId=${applicationPublicId}`;
         const appResponse = await axios.get(url, await this.getAxiosConfig(this.username, this.password));
-        const applicationInternalId = appResponse?.data?.applications[0]?.id;
+        const applicationInternalId = appResponse?.data?.applications?.[0]?.id;
         if (!applicationInternalId) {
-            throw new Error(`Failed to fetch the application internal ID for the public ID: ${applicationPublicId}, does not exist.`);
+            throw new Error(`No application was returned for the public ID: ${applicationPublicId}. ` +
+                `Ensure the application exists and that the IQ Server user has the 'View IQ Elements' permission for it.`);
         }
         return applicationInternalId;
     }
@@ -65992,6 +67033,12 @@ class IqClient {
         };
         if (username && password) {
             config.auth = { username, password };
+        }
+        const proxyAgents = getProxyAgents(this.proxy, this.proxyUser);
+        if (proxyAgents) {
+            config.httpAgent = proxyAgents.httpAgent;
+            config.httpsAgent = proxyAgents.httpsAgent;
+            config.proxy = proxyAgents.proxy;
         }
         return config;
     }
@@ -66159,6 +67206,8 @@ function getIqClientIfPossible(params) {
             .withUrl(params.iqServerUrl)
             .withUsername(params.username)
             .withPassword(params.password)
+            .withProxy(params.proxy)
+            .withProxyUser(params.proxyUser)
             .build();
     }
     return undefined;
@@ -66172,6 +67221,8 @@ function getIqClientIfPossible(params) {
 class RunConfigurationResolver extends BaseConfigurationResolver {
     copyPipelineOnlyConfig(taskParameters, configuration) {
         this.copyString(taskParameters.iqCliDownloadAuth, configuration, 'iqCliDownloadAuth');
+        this.copyString(taskParameters.proxy, configuration, 'proxy');
+        this.copyString(taskParameters.proxyUser, configuration, 'proxyUser');
     }
     copyNonEmptyPipelineConfig(taskParameters, configuration) {
         this.copyPipelineOnlyConfig(taskParameters, configuration);
@@ -66319,7 +67370,9 @@ function getParameters() {
         iqServerUrl: getInput(INPUT_IQ_SERVER_URL),
         username: getInput(INPUT_USERNAME),
         password: getInput(INPUT_PASSWORD),
-        applicationId: getInput(INPUT_APPLICATION_ID)
+        applicationId: getInput(INPUT_APPLICATION_ID),
+        proxy: getInput(INPUT_PROXY),
+        proxyUser: getInput(INPUT_PROXY_USER)
     };
 }
 /**

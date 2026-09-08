@@ -19,6 +19,15 @@ inputs:
   application-id:
     description: 'Lifecycle (IQ Server) application ID.'
     required: true
+  proxy:
+    description:
+      'Specify a proxy to use when connecting to Lifecycle (IQ Server). This property is set using the format
+      host[:port]. Do not include a scheme: a value such as http://proxy:8888 is parsed as the host name http.'
+    required: false
+  proxy-user:
+    description:
+      'Specify proxy credentials in the following format: username:password. The password cannot contain a colon.'
+    required: false
   scan-id:
     description: 'The scan ID to fetch the report.'
     required: true

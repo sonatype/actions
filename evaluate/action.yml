@@ -73,10 +73,12 @@ inputs:
   proxy:
     description:
       'Specify a proxy to use when connecting to Lifecycle (IQ Server). This property is set using the format
-      host[:port], otherwise, the CLI uses the default HTTP proxy set with the JVM.'
+      host[:port], otherwise, the CLI uses the default HTTP proxy set with the JVM. Do not include a scheme: a value
+      such as http://proxy:8888 is parsed as the host name http.'
     required: false
   proxy-user:
-    description: 'Specify proxy credentials in the following format: username:password.'
+    description:
+      'Specify proxy credentials in the following format: username:password. The password cannot contain a colon.'
     required: false
   include-sha-256:
     description: 'If set, SHA256 checksums are included in the scan file.'
@@ -195,7 +197,9 @@ outputs:
     description: 'Name of the generated SARIF file containing all found vulnerabilities, if configured.'
   cli-exit-code:
     value: ${{ steps.run-iq-cli.outputs.cli-exit-code }}
-    description: 'Exit code returned by the IQ CLI (0=SUCCESS, 1=POLICY_VIOLATION, 2=SCANNING_ERROR, 3=REACHABILITY_ERROR, 4=CONFIGURATION_ERROR, 5=CONNECTIVITY_ERROR, 6=LOCAL_IO_ERROR, 7=AUTH_ERROR, 99=INTERNAL_ERROR)'
+    description:
+      'Exit code returned by the IQ CLI (0=SUCCESS, 1=POLICY_VIOLATION, 2=SCANNING_ERROR, 3=REACHABILITY_ERROR,
+      4=CONFIGURATION_ERROR, 5=CONNECTIVITY_ERROR, 6=LOCAL_IO_ERROR, 7=AUTH_ERROR, 99=INTERNAL_ERROR)'
   cli-exit-category:
     value: ${{ steps.run-iq-cli.outputs.cli-exit-category }}
     description: 'Category name for the exit code (e.g., SUCCESS, POLICY_VIOLATION, CONNECTIVITY_ERROR)'
@@ -208,7 +212,7 @@ runs:
   steps:
     - name: Setup IQ CLI Action
       id: setup-iq-cli
-      uses: sonatype/actions/setup-iq-cli@v1.14.0
+      uses: sonatype/actions/setup-iq-cli@v1.14.1
       with:
         iq-cli-version: 'latest'
 
@@ -220,7 +224,7 @@ runs:
 
     - name: Run IQ CLI Action
       id: run-iq-cli
-      uses: sonatype/actions/run-iq-cli@v1.14.0
+      uses: sonatype/actions/run-iq-cli@v1.14.1
       with:
         iq-cli-version: ${{ steps.setup-iq-cli.outputs.iq-cli-version }}
         username: ${{ inputs.username }}

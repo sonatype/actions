@@ -75,10 +75,12 @@ inputs:
   proxy:
     description:
       'Specify a proxy to use when connecting to Lifecycle (IQ Server). This property is set using the format
-      host[:port], otherwise, the CLI uses the default HTTP proxy set with the JVM.'
+      host[:port], otherwise, the CLI uses the default HTTP proxy set with the JVM. Do not include a scheme: a value
+      such as http://proxy:8888 is parsed as the host name http.'
     required: false
   proxy-user:
-    description: 'Specify proxy credentials in the following format: username:password.'
+    description:
+      'Specify proxy credentials in the following format: username:password. The password cannot contain a colon.'
     required: false
   include-sha-256:
     description: 'If set, SHA256 checksums are included in the scan file.'

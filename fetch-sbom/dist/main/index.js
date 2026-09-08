@@ -12,19 +12,19 @@ var require = __createRequire.createRequire(import.meta.url);
 
 import * as os from 'os';
 import os__default, { EOL as EOL$2 } from 'os';
-import * as crypto$1 from 'crypto';
+import * as crypto from 'crypto';
 import crypto__default, { createHash } from 'crypto';
 import * as fs from 'fs';
 import fs__default, { promises as promises$1, existsSync, readFileSync } from 'fs';
-import * as path$1 from 'path';
+import * as path from 'path';
 import path__default, { normalize, resolve } from 'path';
 import * as http from 'http';
 import http__default from 'http';
-import * as https from 'https';
-import https__default from 'https';
+import * as require$$1 from 'https';
+import require$$1__default from 'https';
 import require$$0$4 from 'net';
-import require$$1$1 from 'tls';
-import require$$1, { EventEmitter } from 'events';
+import require$$1$2 from 'tls';
+import require$$1$1, { EventEmitter } from 'events';
 import require$$5, { ok } from 'assert';
 import * as require$$0$3 from 'util';
 import require$$0__default from 'util';
@@ -35,18 +35,16 @@ import require$$6 from 'timers';
 import * as stream$2 from 'stream';
 import stream__default, { Readable } from 'stream';
 import Stream, { Transform, Readable as Readable$1 } from 'node:stream';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import require$$0$6, { Buffer as Buffer$1 } from 'buffer';
 import os$1, { EOL as EOL$1 } from 'node:os';
 import util$a, { inspect as inspect$1 } from 'node:util';
 import process$2 from 'node:process';
 import http$1 from 'node:http';
-import https$1 from 'node:https';
+import https from 'node:https';
 import zlib from 'node:zlib';
 import buffer from 'node:buffer';
 import { createHmac } from 'node:crypto';
-import require$$1$2 from 'tty';
+import require$$1$3 from 'tty';
 import require$$5$1 from 'url';
 import fs$1 from 'node:fs';
 import fs$2, { realpath } from 'fs/promises';
@@ -194,7 +192,7 @@ function issueFileCommand(command, message) {
     });
 }
 function prepareKeyValueMessage(key, value) {
-    const delimiter = `ghadelimiter_${crypto$1.randomUUID()}`;
+    const delimiter = `ghadelimiter_${crypto.randomUUID()}`;
     const convertedValue = toCommandValue(value);
     // These should realistically never happen, but just in case someone finds a
     // way to exploit uuid generation let's not allow keys or values that contain
@@ -206,6 +204,96 @@ function prepareKeyValueMessage(key, value) {
         throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
     }
     return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+}
+
+function getProxyUrl(reqUrl) {
+    const usingSsl = reqUrl.protocol === 'https:';
+    if (checkBypass(reqUrl)) {
+        return undefined;
+    }
+    const proxyVar = (() => {
+        if (usingSsl) {
+            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
+        }
+        else {
+            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
+        }
+    })();
+    if (proxyVar) {
+        try {
+            return new DecodedURL(proxyVar);
+        }
+        catch (_a) {
+            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
+                return new DecodedURL(`http://${proxyVar}`);
+        }
+    }
+    else {
+        return undefined;
+    }
+}
+function checkBypass(reqUrl) {
+    if (!reqUrl.hostname) {
+        return false;
+    }
+    const reqHost = reqUrl.hostname;
+    if (isLoopbackAddress(reqHost)) {
+        return true;
+    }
+    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
+    if (!noProxy) {
+        return false;
+    }
+    // Determine the request port
+    let reqPort;
+    if (reqUrl.port) {
+        reqPort = Number(reqUrl.port);
+    }
+    else if (reqUrl.protocol === 'http:') {
+        reqPort = 80;
+    }
+    else if (reqUrl.protocol === 'https:') {
+        reqPort = 443;
+    }
+    // Format the request hostname and hostname with port
+    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
+    if (typeof reqPort === 'number') {
+        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
+    }
+    // Compare request host against noproxy
+    for (const upperNoProxyItem of noProxy
+        .split(',')
+        .map(x => x.trim().toUpperCase())
+        .filter(x => x)) {
+        if (upperNoProxyItem === '*' ||
+            upperReqHosts.some(x => x === upperNoProxyItem ||
+                x.endsWith(`.${upperNoProxyItem}`) ||
+                (upperNoProxyItem.startsWith('.') &&
+                    x.endsWith(`${upperNoProxyItem}`)))) {
+            return true;
+        }
+    }
+    return false;
+}
+function isLoopbackAddress(host) {
+    const hostLower = host.toLowerCase();
+    return (hostLower === 'localhost' ||
+        hostLower.startsWith('127.') ||
+        hostLower.startsWith('[::1]') ||
+        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
+class DecodedURL extends URL {
+    constructor(url, base) {
+        super(url, base);
+        this._decodedUsername = decodeURIComponent(super.username);
+        this._decodedPassword = decodeURIComponent(super.password);
+    }
+    get username() {
+        return this._decodedUsername;
+    }
+    get password() {
+        return this._decodedPassword;
+    }
 }
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
@@ -250,10 +338,10 @@ var hasRequiredTunnel$1;
 function requireTunnel$1 () {
 	if (hasRequiredTunnel$1) return tunnel$1;
 	hasRequiredTunnel$1 = 1;
-	var tls = require$$1$1;
+	var tls = require$$1$2;
 	var http = http__default;
-	var https = https__default;
-	var events = require$$1;
+	var https = require$$1__default;
+	var events = require$$1$1;
 	var util = require$$0__default;
 
 
@@ -527,14 +615,14 @@ var tunnelExports = requireTunnel();
 
 var undici = {exports: {}};
 
-const require$q = createRequire(import.meta.url);
-function __require$o() { return require$q("node:assert"); }
-
 const require$p = createRequire(import.meta.url);
-function __require$n() { return require$p("node:net"); }
+function __require$o() { return require$p("node:assert"); }
 
 const require$o = createRequire(import.meta.url);
-function __require$m() { return require$o("node:http"); }
+function __require$n() { return require$o("node:net"); }
+
+const require$n = createRequire(import.meta.url);
+function __require$m() { return require$n("node:http"); }
 
 var symbols;
 var hasRequiredSymbols;
@@ -619,14 +707,14 @@ function requireSymbols () {
 	return symbols;
 }
 
-const require$n = createRequire(import.meta.url);
-function __require$l() { return require$n("node:stream"); }
-
 const require$m = createRequire(import.meta.url);
-function __require$k() { return require$m("node:querystring"); }
+function __require$l() { return require$m("node:stream"); }
 
 const require$l = createRequire(import.meta.url);
-function __require$j() { return require$l("node:events"); }
+function __require$k() { return require$l("node:querystring"); }
+
+const require$k = createRequire(import.meta.url);
+function __require$j() { return require$k("node:events"); }
 
 var timers;
 var hasRequiredTimers;
@@ -2905,11 +2993,11 @@ function requireStats () {
 	return stats;
 }
 
-const require$k = createRequire(import.meta.url);
-function __require$i() { return require$k("node:diagnostics_channel"); }
-
 const require$j = createRequire(import.meta.url);
-function __require$h() { return require$j("node:util"); }
+function __require$i() { return require$j("node:diagnostics_channel"); }
+
+const require$i = createRequire(import.meta.url);
+function __require$h() { return require$i("node:util"); }
 
 var diagnostics;
 var hasRequiredDiagnostics;
@@ -3146,11 +3234,11 @@ function requireDiagnostics () {
 	return diagnostics;
 }
 
-var request$2;
+var request$3;
 var hasRequiredRequest$1;
 
 function requireRequest$1 () {
-	if (hasRequiredRequest$1) return request$2;
+	if (hasRequiredRequest$1) return request$3;
 	hasRequiredRequest$1 = 1;
 
 	const {
@@ -3614,8 +3702,8 @@ function requireRequest$1 () {
 	  }
 	}
 
-	request$2 = Request;
-	return request$2;
+	request$3 = Request;
+	return request$3;
 }
 
 var wrapHandler;
@@ -4093,8 +4181,8 @@ function requireDispatcherBase () {
 	return dispatcherBase;
 }
 
-const require$i = createRequire(import.meta.url);
-function __require$g() { return require$i("node:tls"); }
+const require$h = createRequire(import.meta.url);
+function __require$g() { return require$h("node:tls"); }
 
 var connect;
 var hasRequiredConnect;
@@ -4822,8 +4910,8 @@ function requireConstants$6 () {
 
 var llhttpWasm = {exports: {}};
 
-const require$h = createRequire(import.meta.url);
-function __require$f() { return require$h("node:buffer"); }
+const require$g = createRequire(import.meta.url);
+function __require$f() { return require$g("node:buffer"); }
 
 llhttpWasm.exports;
 
@@ -4879,8 +4967,8 @@ function requireLlhttp_simdWasm () {
 	return llhttp_simdWasm.exports;
 }
 
-const require$g = createRequire(import.meta.url);
-function __require$e() { return require$g("node:zlib"); }
+const require$f = createRequire(import.meta.url);
+function __require$e() { return require$f("node:zlib"); }
 
 var constants$5;
 var hasRequiredConstants$5;
@@ -5951,22 +6039,22 @@ function requireDataUrl () {
 	return dataUrl;
 }
 
-const require$f = createRequire(import.meta.url);
-function __require$d() { return require$f("node:perf_hooks"); }
-
 const require$e = createRequire(import.meta.url);
-function __require$c() { return require$e("node:util/types"); }
+function __require$d() { return require$e("node:perf_hooks"); }
+
+const require$d = createRequire(import.meta.url);
+function __require$c() { return require$d("node:util/types"); }
 
 var runtimeFeatures = {};
 
-const require$d = createRequire(import.meta.url);
-function __require$b() { return require$d("node:crypto"); }
-
 const require$c = createRequire(import.meta.url);
-function __require$a() { return require$c("node:sqlite"); }
+function __require$b() { return require$c("node:crypto"); }
 
 const require$b = createRequire(import.meta.url);
-function __require$9() { return require$b("node:worker_threads"); }
+function __require$a() { return require$b("node:sqlite"); }
+
+const require$a = createRequire(import.meta.url);
+function __require$9() { return require$a("node:worker_threads"); }
 
 var hasRequiredRuntimeFeatures;
 
@@ -11073,7 +11161,7 @@ function requireClientH1 () {
 
 	function clearIdleSocketValidation (socket) {
 	  if (socket[kIdleSocketValidationTimeout]) {
-	    clearTimeout(socket[kIdleSocketValidationTimeout]);
+	    clearImmediate(socket[kIdleSocketValidationTimeout]);
 	    socket[kIdleSocketValidationTimeout] = null;
 	  }
 
@@ -11082,15 +11170,23 @@ function requireClientH1 () {
 
 	function scheduleIdleSocketValidation (client, socket) {
 	  socket[kIdleSocketValidation] = 1;
-	  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+	  // Yield to the check phase (after poll) so unsolicited bytes / FIN / RST
+	  // already pending on this idle keep-alive socket are processed before the
+	  // next request is written (GHSA-35p6-xmwp-9g52).
+	  //
+	  // setTimeout(0) pays Node's ~1ms timer floor on every sequential reuse
+	  // (#5493). setImmediate avoids that, but an *unref'd* Immediate lets poll
+	  // block for ~500ms when the event loop is otherwise idle (#5600 / #5606).
+	  // A ref'd Immediate both keeps the pending request alive and makes poll
+	  // return immediately — the hybrid those issues asked for.
+	  socket[kIdleSocketValidationTimeout] = setImmediate(() => {
 	    socket[kIdleSocketValidationTimeout] = null;
 	    socket[kIdleSocketValidation] = 2;
 
 	    if (client[kSocket] === socket && !socket.destroyed) {
 	      client[kResume]();
 	    }
-	  }, 0);
-	  socket[kIdleSocketValidationTimeout].unref?.();
+	  });
 	}
 
 	/**
@@ -11808,7 +11904,9 @@ function requireClientH2 () {
 	  RequestAbortedError,
 	  SocketError,
 	  InformationalError,
-	  InvalidArgumentError
+	  InvalidArgumentError,
+	  HeadersTimeoutError,
+	  BodyTimeoutError
 	} = requireErrors$2();
 	const {
 	  kUrl,
@@ -11833,6 +11931,7 @@ function requireClientH2 () {
 	  kHTTPContext,
 	  kClosed,
 	  kBodyTimeout,
+	  kHeadersTimeout,
 	  kEnableConnectProtocol,
 	  kRemoteSettings,
 	  kHTTP2Stream,
@@ -12019,7 +12118,11 @@ function requireClientH2 () {
 	  const socket = client[kSocket];
 
 	  if (socket?.destroyed === false) {
-	    if (client[kSize] === 0 || client[kMaxConcurrentStreams] === 0) {
+	    // Only let the process exit when there is genuinely nothing outstanding.
+	    // Unreffing because the peer advertised MAX_CONCURRENT_STREAMS = 0 left
+	    // queued requests with nothing holding the event loop open, so the process
+	    // could exit with status 0 while an awaited request never settled.
+	    if (client[kSize] === 0) {
 	      socket.unref();
 	      client[kHTTP2Session].unref();
 	    } else {
@@ -12114,6 +12217,36 @@ function requireClientH2 () {
 	 * @this {import('http2').ClientHttp2Session}
 	 * @param {number} errorCode
 	 */
+	// Backport of #5410 and #5569. HTTP/2 multiplexes, so requests complete out of
+	// order; advancing kRunningIdx blindly retired whichever request happened to
+	// sit at the head instead of the one that actually finished, which both lost
+	// requests and left phantom running slots behind.
+	function completeRequest (client, request, resetPendingIdx = false) {
+	  const queue = client[kQueue];
+	  const runningIdx = client[kRunningIdx];
+
+	  // In-order completion: clear the request and advance without splicing.
+	  // The client's resume loop compacts cleared slots once the index grows.
+	  if (runningIdx < client[kPendingIdx] && queue[runningIdx] === request) {
+	    queue[runningIdx] = null;
+	    client[kRunningIdx] = runningIdx + 1;
+	    return
+	  }
+
+	  const index = queue.indexOf(request, runningIdx);
+
+	  if (index === -1 || index >= client[kPendingIdx]) {
+	    return
+	  }
+
+	  queue.splice(index, 1);
+	  client[kPendingIdx]--;
+
+	  if (resetPendingIdx && client[kPendingIdx] < client[kRunningIdx]) {
+	    client[kPendingIdx] = client[kRunningIdx];
+	  }
+	}
+
 	function onHttp2SessionGoAway (errorCode) {
 	  // TODO(mcollina): Verify if GOAWAY implements the spec correctly:
 	  // https://datatracker.ietf.org/doc/html/rfc7540#section-6.8
@@ -12135,7 +12268,9 @@ function requireClientH2 () {
 	  if (client[kRunningIdx] < client[kQueue].length) {
 	    const request = client[kQueue][client[kRunningIdx]];
 	    client[kQueue][client[kRunningIdx]++] = null;
-	    util.errorRequest(client, request, err);
+	    if (request != null) {
+	      util.errorRequest(client, request, err);
+	    }
 	    client[kPendingIdx] = client[kRunningIdx];
 	  }
 
@@ -12168,7 +12303,9 @@ function requireClientH2 () {
 	    const requests = client[kQueue].splice(client[kRunningIdx]);
 	    for (let i = 0; i < requests.length; i++) {
 	      const request = requests[i];
-	      util.errorRequest(client, request, err);
+	      if (request != null) {
+	        util.errorRequest(client, request, err);
+	      }
 	    }
 	  }
 	}
@@ -12216,7 +12353,10 @@ function requireClientH2 () {
 	}
 
 	function writeH2 (client, request) {
-	  const requestTimeout = request.bodyTimeout ?? client[kBodyTimeout];
+	  // Time to the response headers, then time between body chunks. Using
+	  // bodyTimeout for both made headersTimeout a no-op over HTTP/2.
+	  const headersTimeout = request.headersTimeout ?? client[kHeadersTimeout];
+	  const bodyTimeout = request.bodyTimeout ?? client[kBodyTimeout];
 	  const session = client[kHTTP2Session];
 	  const { method, path, host, upgrade, expectContinue, signal, protocol, headers: reqHeaders } = request;
 	  let { body } = request;
@@ -12283,6 +12423,7 @@ function requireClientH2 () {
 
 	      // We move the running index to the next request
 	      client[kOnError](err);
+	      completeRequest(client, request);
 	      client[kResume]();
 	    }
 
@@ -12337,7 +12478,7 @@ function requireClientH2 () {
 	        request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 
 	        ++session[kOpenStreams];
-	        client[kQueue][client[kRunningIdx]++] = null;
+	        completeRequest(client, request);
 	      });
 
 	      stream.on('error', () => {
@@ -12354,7 +12495,7 @@ function requireClientH2 () {
 	        if (session[kOpenStreams] === 0) session.unref();
 	      });
 
-	      stream.setTimeout(requestTimeout);
+	      stream.setTimeout(headersTimeout);
 	      return true
 	    }
 
@@ -12370,13 +12511,14 @@ function requireClientH2 () {
 
 	      request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 	      ++session[kOpenStreams];
-	      client[kQueue][client[kRunningIdx]++] = null;
+	      completeRequest(client, request);
 	    });
+	    stream.on('error', abort);
 	    stream.once('close', () => {
 	      session[kOpenStreams] -= 1;
 	      if (session[kOpenStreams] === 0) session.unref();
 	    });
-	    stream.setTimeout(requestTimeout);
+	    stream.setTimeout(headersTimeout);
 
 	    return true
 	  }
@@ -12477,7 +12619,7 @@ function requireClientH2 () {
 
 	  // Increment counter as we have new streams open
 	  ++session[kOpenStreams];
-	  stream.setTimeout(requestTimeout);
+	  stream.setTimeout(headersTimeout);
 
 	  // Track whether we received a response (headers)
 	  let responseReceived = false;
@@ -12486,6 +12628,7 @@ function requireClientH2 () {
 	    const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
 	    request.onResponseStarted();
 	    responseReceived = true;
+	    stream.setTimeout(bodyTimeout);
 
 	    // Due to the stream nature, it is possible we face a race condition
 	    // where the stream has been assigned, but the request has been aborted
@@ -12520,14 +12663,13 @@ function requireClientH2 () {
 	        request.onComplete({});
 	      }
 
-	      client[kQueue][client[kRunningIdx]++] = null;
+	      completeRequest(client, request);
 	      client[kResume]();
 	    } else {
 	      // Stream ended without receiving a response - this is an error
 	      // (e.g., server destroyed the stream before sending headers)
 	      abort(new InformationalError('HTTP/2: stream half-closed (remote)'));
-	      client[kQueue][client[kRunningIdx]++] = null;
-	      client[kPendingIdx] = client[kRunningIdx];
+	      completeRequest(client, request, true);
 	      client[kResume]();
 	    }
 	  });
@@ -12537,6 +12679,14 @@ function requireClientH2 () {
 	    session[kOpenStreams] -= 1;
 	    if (session[kOpenStreams] === 0) {
 	      session.unref();
+	    }
+
+	    // A stream can close without ever emitting 'end' or 'error': a peer's
+	    // RST_STREAM(CANCEL) received before the response is reported by Node as a
+	    // bare 'close', and destroying the stream unenrolls its timeout, so no
+	    // 'timeout' follows either. Nothing else would ever settle this request.
+	    if (!request.aborted && !request.completed) {
+	      abort(new InformationalError('HTTP/2: stream closed before the response was complete'));
 	    }
 	  });
 
@@ -12555,7 +12705,9 @@ function requireClientH2 () {
 	  });
 
 	  stream.on('timeout', () => {
-	    const err = new InformationalError(`HTTP/2: "stream timeout after ${requestTimeout}"`);
+	    const err = responseReceived
+	      ? new BodyTimeoutError(`HTTP/2: "body timeout after ${bodyTimeout}"`)
+	      : new HeadersTimeoutError(`HTTP/2: "headers timeout after ${headersTimeout}"`);
 	    stream.removeAllListeners('data');
 	    session[kOpenStreams] -= 1;
 
@@ -13175,7 +13327,9 @@ function requireClient () {
 	      const requests = this[kQueue].splice(this[kPendingIdx]);
 	      for (let i = 0; i < requests.length; i++) {
 	        const request = requests[i];
-	        util.errorRequest(this, request, err);
+	        if (request != null) {
+	          util.errorRequest(this, request, err);
+	        }
 	      }
 
 	      const callback = () => {
@@ -13214,7 +13368,9 @@ function requireClient () {
 
 	    for (let i = 0; i < requests.length; i++) {
 	      const request = requests[i];
-	      util.errorRequest(client, request, err);
+	      if (request != null) {
+	        util.errorRequest(client, request, err);
+	      }
 	    }
 	    assert(client[kSize] === 0);
 	  }
@@ -14013,14 +14169,16 @@ function requireBalancedPool () {
 	}
 
 	class BalancedPool extends PoolBase {
-	  constructor (upstreams = [], { factory = defaultFactory, ...opts } = {}) {
+	  constructor (upstreams = [], { factory = defaultFactory, connect, tls, ...opts } = {}) {
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
 
 	    super(opts);
 
-	    this[kOptions] = { ...util.deepClone(opts) };
+	    if (connect && typeof connect !== 'function') connect = { ...connect };
+	    if (tls && typeof tls !== 'function') tls = { ...tls };
+	    this[kOptions] = { ...util.deepClone(opts), connect, tls };
 	    this[kOptions].interceptors = opts.interceptors
 	      ? { ...opts.interceptors }
 	      : undefined;
@@ -14495,8 +14653,8 @@ function requireAgent$1 () {
 	return agent$1;
 }
 
-const require$a = createRequire(import.meta.url);
-function __require$8() { return require$a("node:url"); }
+const require$9 = createRequire(import.meta.url);
+function __require$8() { return require$9("node:url"); }
 
 var socks5Utils;
 var hasRequiredSocks5Utils;
@@ -15999,8 +16157,16 @@ function requireRetryHandler () {
 	    if (this.retryOpts.throwOnError) {
 	      // Preserve old behavior for status codes that are not eligible for retry
 	      if (this.retryOpts.statusCodes.includes(statusCode) === false) {
-	        this.headersSent = true;
-	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        if (this.headersSent) {
+	          // The downstream handler already received the response from an
+	          // earlier attempt. Forwarding this response would replace the
+	          // downstream body and leave the original body pending forever.
+	          this.handler.onResponseError?.(controller, err);
+	        } else {
+	          this.headersSent = true;
+	          this.checkpointResponseEnd(headers);
+	          this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        }
 	      } else {
 	        this.error = err;
 	      }
@@ -16010,14 +16176,23 @@ function requireRetryHandler () {
 
 	    if (isDisturbed(this.opts.body)) {
 	      this.headersSent = true;
+	      this.checkpointResponseEnd(headers);
 	      this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
 	      return
 	    }
 
 	    function shouldRetry (passedErr) {
 	      if (passedErr) {
-	        this.headersSent = true;
-	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        if (this.headersSent) {
+	          // The downstream handler already received the response from an
+	          // earlier attempt. Forwarding this response would replace the
+	          // downstream body and leave the original body pending forever.
+	          this.handler.onResponseError?.(controller, passedErr);
+	        } else {
+	          this.headersSent = true;
+	          this.checkpointResponseEnd(headers);
+	          this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        }
 	        controller.resume();
 	        return
 	      }
@@ -16035,6 +16210,20 @@ function requireRetryHandler () {
 	      },
 	      shouldRetry.bind(this)
 	    );
+	  }
+
+	  checkpointResponseEnd (headers) {
+	    if (this.end == null && this.opts.method !== 'HEAD') {
+	      const contentLength = headers['content-length'];
+	      this.end = contentLength != null ? Number(contentLength) - 1 : null;
+
+	      assert(
+	        this.end == null || Number.isFinite(this.end),
+	        'invalid content-length'
+	      );
+
+	      this.resume = this.end != null;
+	    }
 	  }
 
 	  onRequestStart (controller, context) {
@@ -16157,8 +16346,12 @@ function requireRetryHandler () {
 
 	      const { start, size, end = size ? size - 1 : null } = contentRange;
 
-	      assert(this.start === start, 'content-range mismatch');
-	      assert(this.end == null || this.end === end, 'content-range mismatch');
+	      if (this.start !== start || (this.end != null && this.end !== end)) {
+	        throw new RequestRetryError('Content-Range mismatch', statusCode, {
+	          headers,
+	          data: { count: this.retryCount }
+	        })
+	      }
 
 	      return
 	    }
@@ -16283,7 +16476,7 @@ function requireRetryHandler () {
 	  }
 
 	  onResponseError (controller, err) {
-	    if (controller?.aborted || isDisturbed(this.opts.body)) {
+	    if (controller?.aborted || isDisturbed(this.opts.body) || (this.headersSent && !this.resume)) {
 	      this.handler.onResponseError?.(controller, err);
 	      return
 	    }
@@ -16429,8 +16622,8 @@ var api = {};
 
 var apiRequest = {exports: {}};
 
-const require$9 = createRequire(import.meta.url);
-function __require$7() { return require$9("node:async_hooks"); }
+const require$8 = createRequire(import.meta.url);
+function __require$7() { return require$8("node:async_hooks"); }
 
 var readable$2;
 var hasRequiredReadable$2;
@@ -19234,8 +19427,8 @@ function requireMockPool () {
 	return mockPool;
 }
 
-const require$8 = createRequire(import.meta.url);
-function __require$6() { return require$8("node:console"); }
+const require$7 = createRequire(import.meta.url);
+function __require$6() { return require$7("node:console"); }
 
 var pendingInterceptorsFormatter;
 var hasRequiredPendingInterceptorsFormatter;
@@ -19528,14 +19721,14 @@ function requireMockAgent () {
 	return mockAgent;
 }
 
-const require$7 = createRequire(import.meta.url);
-function __require$5() { return require$7("node:fs/promises"); }
-
 const require$6 = createRequire(import.meta.url);
-function __require$4() { return require$6("node:path"); }
+function __require$5() { return require$6("node:fs/promises"); }
 
 const require$5 = createRequire(import.meta.url);
-function __require$3() { return require$5("node:timers"); }
+function __require$4() { return require$5("node:path"); }
+
+const require$4 = createRequire(import.meta.url);
+function __require$3() { return require$4("node:timers"); }
 
 var snapshotUtils;
 var hasRequiredSnapshotUtils;
@@ -21203,7 +21396,6 @@ function requireDump () {
 	  #maxSize = 1024 * 1024
 	  #dumped = false
 	  #size = 0
-	  #controller = null
 	  aborted = false
 	  reason = false
 
@@ -21225,7 +21417,6 @@ function requireDump () {
 
 	  onRequestStart (controller, context) {
 	    controller.abort = this.#abort.bind(this);
-	    this.#controller = controller;
 
 	    return super.onRequestStart(controller, context)
 	  }
@@ -21249,43 +21440,32 @@ function requireDump () {
 	  }
 
 	  onResponseError (controller, err) {
-	    if (this.#dumped) {
-	      return
-	    }
-
-	    // On network errors before connect, controller will be null
-	    err = this.#controller?.reason ?? err;
-
-	    super.onResponseError(controller, err);
+	    super.onResponseError(controller, this.aborted === true ? this.reason : err);
 	  }
 
 	  onResponseData (controller, chunk) {
 	    this.#size = this.#size + chunk.length;
 
-	    if (this.#size >= this.#maxSize) {
-	      this.#dumped = true;
+	    if (this.#size > this.#maxSize) {
+	      throw new RequestAbortedError(
+	        `Response size (${this.#size}) larger than maxSize (${this.#maxSize})`
+	      )
+	    }
 
-	      if (this.aborted === true) {
-	        super.onResponseError(controller, this.reason);
-	      } else {
-	        super.onResponseEnd(controller, {});
-	      }
+	    if (this.#size === this.#maxSize) {
+	      this.#dumped = true;
 	    }
 
 	    return true
 	  }
 
 	  onResponseEnd (controller, trailers) {
-	    if (this.#dumped) {
-	      return
-	    }
-
-	    if (this.#controller.aborted === true) {
+	    if (this.aborted === true) {
 	      super.onResponseError(controller, this.reason);
 	      return
 	    }
 
-	    super.onResponseEnd(controller, trailers);
+	    super.onResponseEnd(controller, this.#dumped ? {} : trailers);
 	  }
 	}
 
@@ -21309,8 +21489,8 @@ function requireDump () {
 	return dump;
 }
 
-const require$4 = createRequire(import.meta.url);
-function __require$2() { return require$4("node:dns"); }
+const require$3 = createRequire(import.meta.url);
+function __require$2() { return require$3("node:dns"); }
 
 var dns;
 var hasRequiredDns;
@@ -23467,6 +23647,13 @@ function requireCacheHandler () {
 	    }
 
 	    const cacheControlHeader = resHeaders['cache-control'];
+	    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
+
+	    if (revalidationResponseDisallowsCachedReuse(this.#cacheType, resHeaders, cacheControlDirectives)) {
+	      deleteCachedValue(this.#store, this.#cacheKey);
+	      return downstreamOnHeaders()
+	    }
+
 	    const heuristicallyCacheable = resHeaders['last-modified'] && arrayIncludes(HEURISTICALLY_CACHEABLE_STATUS_CODES, statusCode);
 	    if (
 	      !cacheControlHeader &&
@@ -23483,8 +23670,7 @@ function requireCacheHandler () {
 	      return downstreamOnHeaders()
 	    }
 
-	    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
-	    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
+	    if (!canCacheResponse(this.#cacheType, this.#cacheKey.method, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
 	      if (statusCode === 304 && (cacheControlHeader || revalidationResponseDisallowsCachedReuse(this.#cacheType, resHeaders, cacheControlDirectives))) {
 	        deleteCachedValue(this.#store, this.#cacheKey);
 	      }
@@ -23725,7 +23911,10 @@ function requireCacheHandler () {
 	 */
 	function revalidationResponseDisallowsCachedReuse (cacheType, resHeaders, cacheControlDirectives) {
 	  return cacheControlDirectives['no-store'] === true ||
-	    (cacheType === 'shared' && cacheControlDirectives.private === true) ||
+	    (cacheType === 'shared' && (
+	      cacheControlDirectives.private === true ||
+	      Object.hasOwn(resHeaders, 'set-cookie')
+	    )) ||
 	    (resHeaders.vary ? isInvalidOrWildcardVaryHeader(resHeaders.vary) : false)
 	}
 
@@ -23733,12 +23922,16 @@ function requireCacheHandler () {
 	 * @see https://www.rfc-editor.org/rfc/rfc9111.html#name-storing-responses-to-authen
 	 *
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheOptions['type']} cacheType
+	 * @param {string} method
 	 * @param {number} statusCode
 	 * @param {import('../../types/header.d.ts').IncomingHttpHeaders} resHeaders
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives} cacheControlDirectives
 	 * @param {import('../../types/header.d.ts').IncomingHttpHeaders} [reqHeaders]
 	 */
-	function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
+	function canCacheResponse (cacheType, method, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
+	  if (!arrayIncludes(util.safeHTTPMethods, method)) {
+	    return false
+	  }
 	  // Status code must be final and understood.
 	  if (statusCode < 200 || arrayIncludes(NOT_UNDERSTOOD_STATUS_CODES, statusCode)) {
 	    return false
@@ -23759,7 +23952,10 @@ function requireCacheHandler () {
 	    return false
 	  }
 
-	  if (cacheType === 'shared' && cacheControlDirectives.private === true) {
+	  if (cacheType === 'shared' && (
+	    cacheControlDirectives.private === true ||
+	    Object.hasOwn(resHeaders, 'set-cookie')
+	  )) {
 	    return false
 	  }
 
@@ -24564,7 +24760,10 @@ function requireCache$1 () {
 	 * @returns {boolean}
 	 */
 	function revalidationResponseDisallowsCachedReuse (cacheType, headers) {
-	  if (headers.vary && isInvalidOrWildcardVaryHeader(headers.vary)) {
+	  if (
+	    (headers.vary && isInvalidOrWildcardVaryHeader(headers.vary)) ||
+	    (cacheType === 'shared' && Object.hasOwn(headers, 'set-cookie'))
+	  ) {
 	    return true
 	  }
 
@@ -24823,6 +25022,17 @@ function requireCache$1 () {
 	    return handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl)
 	  }
 
+	  // Shared stores may outlive the Undici version that wrote them. Do not
+	  // re-serve a Set-Cookie header from an existing shared-cache entry.
+	  if (globalOpts.type === 'shared' && Object.hasOwn(result.headers, 'set-cookie')) {
+	    if (util.isStream(result.body)) {
+	      result.body.on('error', nop).destroy();
+	    }
+
+	    deleteCachedValue(globalOpts.store, cacheKey);
+	    return handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl)
+	  }
+
 	  const now = Date.now();
 	  if (now > result.deleteAt) {
 	    // Response is expired, cache store shouldn't have given this to us
@@ -25021,6 +25231,11 @@ function requireCache$1 () {
 	       * @type {import('../../types/cache-interceptor.d.ts').default.CacheKey}
 	       */
 	      const cacheKey = makeCacheKey(opts);
+
+	      if (!arrayIncludes(util.safeHTTPMethods, opts.method)) {
+	        return dispatch(opts, new CacheHandler(globalOpts, cacheKey, handler))
+	      }
+
 	      const result = store.get(cacheKey);
 
 	      if (result && typeof result.then === 'function') {
@@ -25058,7 +25273,8 @@ function requireDecompress () {
 	hasRequiredDecompress = 1;
 
 	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = __require$e();
-	const { pipeline } = __require$l();
+	const { pipeline, Transform: TransformStream } = __require$l();
+	const { InvalidArgumentError, ResponseExceededMaxSizeError } = requireErrors$2();
 	const DecoratorHandler = requireDecoratorHandler();
 	const { runtimeFeatures } = requireRuntimeFeatures();
 
@@ -25078,6 +25294,31 @@ function requireDecompress () {
 	};
 
 	const defaultSkipStatusCodes = /** @type {const} */ ([204, 304]);
+	const defaultMaxSize = 64 * 1024 * 1024;
+
+	/**
+	 * Limits the output of one stage in a decompression chain.
+	 * @param {number} maxSize - Maximum output size in bytes
+	 * @returns {Transform}
+	 */
+	function createMaxSizeLimiter (maxSize) {
+	  let size = 0;
+
+	  return new TransformStream({
+	    transform (chunk, _encoding, callback) {
+	      const decompressedSize = size + chunk.length;
+	      if (decompressedSize > maxSize) {
+	        callback(new ResponseExceededMaxSizeError(
+	          `Decompressed response size (${decompressedSize}) exceeded maxSize (${maxSize})`
+	        ));
+	        return
+	      }
+
+	      size = decompressedSize;
+	      callback(null, chunk);
+	    }
+	  })
+	}
 
 	let warningEmitted = /** @type {boolean} */ (false);
 
@@ -25085,20 +25326,36 @@ function requireDecompress () {
 	 * @typedef {Object} DecompressHandlerOptions
 	 * @property {number[]|Readonly<number[]>} [skipStatusCodes=[204, 304]] - List of status codes to skip decompression for
 	 * @property {boolean} [skipErrorResponses] - Whether to skip decompression for error responses (status codes >= 400)
+	 * @property {number} [maxSize=67108864] - Maximum decompressed response size in bytes
 	 */
 
 	class DecompressHandler extends DecoratorHandler {
 	  /** @type {Transform[]} */
 	  #decompressors = []
+	  /** @type {Record<string, string | string[]> | undefined} */
+	  #trailers
 	  /** @type {Readonly<number[]>} */
 	  #skipStatusCodes
 	  /** @type {boolean} */
 	  #skipErrorResponses
+	  /** @type {number} */
+	  #maxSize
+	  /** @type {number} */
+	  #decompressedSize = 0
+	  /** @type {boolean} */
+	  #terminated = false
+	  /** @type {boolean} */
+	  #inputEnded = false
 
-	  constructor (handler, { skipStatusCodes = defaultSkipStatusCodes, skipErrorResponses = true } = {}) {
+	  constructor (handler, { skipStatusCodes = defaultSkipStatusCodes, skipErrorResponses = true, maxSize = defaultMaxSize } = {}) {
+	    if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+	      throw new InvalidArgumentError('maxSize must be a positive integer')
+	    }
+
 	    super(handler);
 	    this.#skipStatusCodes = skipStatusCodes;
 	    this.#skipErrorResponses = skipErrorResponses;
+	    this.#maxSize = maxSize;
 	  }
 
 	  /**
@@ -25118,7 +25375,7 @@ function requireDecompress () {
 	   * Creates a chain of decompressors for multiple content encodings
 	   *
 	   * @param {string} encodings - Comma-separated list of content encodings
-	   * @returns {Array<DecompressorStream>} - Array of decompressor streams
+	   * @returns {Array<Transform>} - Array of decompressor and limiting streams
 	   * @throws {Error} - If the number of content-encodings exceeds the maximum allowed
 	   */
 	  #createDecompressionChain (encodings) {
@@ -25146,7 +25403,40 @@ function requireDecompress () {
 	      decompressors.push(supportedEncodings[encoding]());
 	    }
 
-	    return decompressors
+	    if (decompressors.length < 2) {
+	      return decompressors
+	    }
+
+	    /** @type {Transform[]} */
+	    const streams = [];
+	    for (let i = 0; i < decompressors.length; i++) {
+	      streams.push(decompressors[i]);
+	      if (i < decompressors.length - 1) {
+	        streams.push(createMaxSizeLimiter(this.#maxSize));
+	      }
+	    }
+
+	    return streams
+	  }
+
+	  /**
+	   * Stops decompression and reports an error.
+	   * @param {Controller} controller - The controller to coordinate with
+	   * @param {Error} error - The decompression error
+	   * @returns {void}
+	   */
+	  #fail (controller, error) {
+	    if (this.#terminated) {
+	      return
+	    }
+
+	    if (this.#inputEnded) {
+	      // The request is already marked complete once the compressed input ends,
+	      // so controller.abort() can no longer propagate decoder flush errors.
+	      this.onResponseError(controller, error);
+	    } else {
+	      controller.abort(error);
+	    }
 	  }
 
 	  /**
@@ -25157,8 +25447,21 @@ function requireDecompress () {
 	   */
 	  #setupDecompressorEvents (decompressor, controller) {
 	    decompressor.on('readable', () => {
+	      if (this.#terminated) {
+	        return
+	      }
+
 	      let chunk;
 	      while ((chunk = decompressor.read()) !== null) {
+	        const decompressedSize = this.#decompressedSize + chunk.length;
+	        if (decompressedSize > this.#maxSize) {
+	          this.#fail(controller, new ResponseExceededMaxSizeError(
+	            `Decompressed response size (${decompressedSize}) exceeded maxSize (${this.#maxSize})`
+	          ));
+	          return
+	        }
+
+	        this.#decompressedSize = decompressedSize;
 	        const result = super.onResponseData(controller, chunk);
 	        if (result === false) {
 	          break
@@ -25167,7 +25470,7 @@ function requireDecompress () {
 	    });
 
 	    decompressor.on('error', (error) => {
-	      super.onResponseError(controller, error);
+	      this.#fail(controller, error);
 	    });
 	  }
 
@@ -25181,7 +25484,13 @@ function requireDecompress () {
 	    this.#setupDecompressorEvents(decompressor, controller);
 
 	    decompressor.on('end', () => {
-	      super.onResponseEnd(controller, {});
+	      if (this.#terminated) {
+	        return
+	      }
+
+	      this.#terminated = true;
+	      this.#cleanupDecompressors();
+	      super.onResponseEnd(controller, this.#trailers);
 	    });
 	  }
 
@@ -25195,11 +25504,18 @@ function requireDecompress () {
 	    this.#setupDecompressorEvents(lastDecompressor, controller);
 
 	    pipeline(this.#decompressors, (err) => {
-	      if (err) {
-	        super.onResponseError(controller, err);
+	      if (this.#terminated) {
 	        return
 	      }
-	      super.onResponseEnd(controller, {});
+
+	      if (err) {
+	        this.#fail(controller, err);
+	        return
+	      }
+
+	      this.#terminated = true;
+	      this.#cleanupDecompressors();
+	      super.onResponseEnd(controller, this.#trailers);
 	    });
 	  }
 
@@ -25238,6 +25554,33 @@ function requireDecompress () {
 	    // Remove compression headers since we're decompressing
 	    const { 'content-encoding': _, 'content-length': __, ...newHeaders } = headers;
 
+	    if (controller?.rawHeaders) {
+	      const rawHeaders = controller.rawHeaders;
+
+	      if (Array.isArray(rawHeaders)) {
+	        const filteredHeaders = [];
+	        for (let i = 0; i < rawHeaders.length; i += 2) {
+	          const headerName = rawHeaders[i];
+	          const name = Buffer.isBuffer(headerName) ? headerName.toString('latin1') : `${headerName}`;
+	          const lowerName = name.toLowerCase();
+
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            continue
+	          }
+
+	          filteredHeaders.push(rawHeaders[i], rawHeaders[i + 1]);
+	        }
+	        rawHeaders.splice(0, rawHeaders.length, ...filteredHeaders);
+	      } else if (typeof rawHeaders === 'object') {
+	        for (const name of Object.keys(rawHeaders)) {
+	          const lowerName = name.toLowerCase();
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            delete rawHeaders[name];
+	          }
+	        }
+	      }
+	    }
+
 	    if (this.#decompressors.length === 1) {
 	      this.#setupSingleDecompressor(controller);
 	    } else {
@@ -25267,8 +25610,9 @@ function requireDecompress () {
 	   */
 	  onResponseEnd (controller, trailers) {
 	    if (this.#decompressors.length > 0) {
+	      this.#inputEnded = true;
+	      this.#trailers = trailers;
 	      this.#decompressors[0].end();
-	      this.#cleanupDecompressors();
 	      return
 	    }
 	    super.onResponseEnd(controller, trailers);
@@ -25280,12 +25624,15 @@ function requireDecompress () {
 	   * @returns {void}
 	   */
 	  onResponseError (controller, err) {
-	    if (this.#decompressors.length > 0) {
-	      for (const decompressor of this.#decompressors) {
-	        decompressor.destroy(err);
-	      }
-	      this.#cleanupDecompressors();
+	    if (this.#terminated) {
+	      return
 	    }
+
+	    this.#terminated = true;
+	    for (const decompressor of this.#decompressors) {
+	      decompressor.destroy();
+	    }
+	    this.#cleanupDecompressors();
 	    super.onResponseError(controller, err);
 	  }
 	}
@@ -27761,11 +28108,11 @@ function requireResponse () {
 
 /* globals AbortController */
 
-var request$1;
+var request$2;
 var hasRequiredRequest;
 
 function requireRequest () {
-	if (hasRequiredRequest) return request$1;
+	if (hasRequiredRequest) return request$2;
 	hasRequiredRequest = 1;
 
 	const { extractBody, mixinBody, cloneBody, bodyUnusable } = requireBody();
@@ -28871,7 +29218,7 @@ function requireRequest () {
 	  }
 	]);
 
-	request$1 = {
+	request$2 = {
 	  Request,
 	  makeRequest,
 	  fromInnerRequest,
@@ -28879,7 +29226,7 @@ function requireRequest () {
 	  getRequestDispatcher,
 	  getRequestState
 	};
-	return request$1;
+	return request$2;
 }
 
 var subresourceIntegrity;
@@ -33025,11 +33372,11 @@ function requireUtil$6 () {
 	return util$6;
 }
 
-var parse$2;
+var parse$3;
 var hasRequiredParse$1;
 
 function requireParse$1 () {
-	if (hasRequiredParse$1) return parse$2;
+	if (hasRequiredParse$1) return parse$3;
 	hasRequiredParse$1 = 1;
 
 	const { collectASequenceOfCodePointsFast } = requireInfra();
@@ -33340,11 +33687,11 @@ function requireParse$1 () {
 	  return parseUnparsedAttributes(unparsedAttributes, cookieAttributeList)
 	}
 
-	parse$2 = {
+	parse$3 = {
 	  parseSetCookie,
 	  parseUnparsedAttributes
 	};
-	return parse$2;
+	return parse$3;
 }
 
 var cookies$1;
@@ -34730,7 +35077,7 @@ function requireConnection () {
 	        // is specified, the server needs to include the same field and one of
 	        // the selected subprotocol values in its response for the connection to
 	        // be established.
-	        if (!requestProtocols.includes(secProtocol)) {
+	        if (requestProtocols === null || !requestProtocols.includes(secProtocol)) {
 	          failWebsocketConnection(handler, 1002, 'Protocol was not set in the opening handshake.');
 	          return
 	        }
@@ -34928,7 +35275,12 @@ function requirePermessageDeflate () {
 
 	        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
 	          callback(new MessageSizeExceededError());
+	          // The inflater may still hold buffered input that can emit a late
+	          // zlib error. Remove the data listener, then deterministically stop
+	          // the stream so a subsequent 'error' cannot fire without a listener
+	          // (which would terminate the process as an unhandled error event).
 	          this.#inflate.removeAllListeners();
+	          this.#inflate.destroy();
 	          this.#inflate = null;
 	          return
 	        }
@@ -36517,9 +36869,9 @@ function requireWebsocketstream () {
 	  /** @type {ReadableStreamDefaultController} */
 	  #readableStreamController
 
-	  // Each WebSocketStream object has an associated writable stream , which is a WritableStream .
-	  /** @type {WritableStream} */
-	  #writableStream
+	  // Retain the controller so the writable stream can be errored while locked.
+	  /** @type {WritableStreamDefaultController} */
+	  #writableStreamController
 
 	  // Each WebSocketStream object has an associated boolean handshake aborted , which is initially false.
 	  #handshakeAborted = false
@@ -36783,6 +37135,9 @@ function requireWebsocketstream () {
 	    // 12. Let writable be a new WritableStream .
 	    // 13. Set up writable with writeAlgorithm , closeAlgorithm , and abortAlgorithm .
 	    const writable = new WritableStream({
+	      start: (controller) => {
+	        this.#writableStreamController = controller;
+	      },
 	      write: (chunk) => this.#write(chunk),
 	      close: () => closeWebSocketConnection(this.#handler, null, null),
 	      abort: (reason) => this.#closeUsingReason(reason)
@@ -36790,9 +37145,6 @@ function requireWebsocketstream () {
 
 	    // Set stream ’s readable stream to readable .
 	    this.#readableStream = readable;
-
-	    // Set stream ’s writable stream to writable .
-	    this.#writableStream = writable;
 
 	    // Resolve stream ’s opened promise with WebSocketOpenInfo «[ " extensions " → extensions , " protocol " → protocol , " readable " → readable , " writable " → writable ]».
 	    this.#openedPromise.resolve({
@@ -36879,9 +37231,7 @@ function requireWebsocketstream () {
 	      this.#readableStreamController.close();
 
 	      // 6.2. Error stream ’s writable stream with an " InvalidStateError " DOMException indicating that a closed WebSocketStream cannot be written to.
-	      if (!this.#writableStream.locked) {
-	        this.#writableStream.abort(new DOMException('A closed WebSocketStream cannot be written to', 'InvalidStateError'));
-	      }
+	      this.#writableStreamController.error(new DOMException('A closed WebSocketStream cannot be written to', 'InvalidStateError'));
 
 	      // 6.3. Resolve stream ’s closed promise with WebSocketCloseInfo «[ " closeCode " → code , " reason " → reason ]».
 	      this.#closedPromise.resolve({
@@ -36898,7 +37248,7 @@ function requireWebsocketstream () {
 	      this.#readableStreamController?.error(error);
 
 	      // 7.3. Error stream ’s writable stream with error .
-	      this.#writableStream?.abort(error);
+	      this.#writableStreamController?.error(error);
 
 	      // 7.4. Reject stream ’s closed promise with error .
 	      this.#closedPromise.reject(error);
@@ -37049,6 +37399,49 @@ function requireEventsourceStream () {
 	 */
 	const SPACE = 0x20;
 
+	const DATA = Buffer.from('data');
+	const EVENT = Buffer.from('event');
+	const ID = Buffer.from('id');
+	const RETRY = Buffer.from('retry');
+
+	function isASCIINumberBytes (buffer, start) {
+	  if (start >= buffer.length) {
+	    return false
+	  }
+
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] < 0x30 || buffer[i] > 0x39) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isValidLastEventIdBytes (buffer, start) {
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] === 0x00) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isFieldName (line, length, field) {
+	  if (length !== field.length) {
+	    return false
+	  }
+
+	  for (let i = 0; i < length; i++) {
+	    if (line[i] !== field[i]) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
 	/**
 	 * @typedef {object} EventSourceStreamEvent
 	 * @type {object}
@@ -37089,11 +37482,14 @@ function requireEventsourceStream () {
 	  eventEndCheck = false
 
 	  /**
-	   * @type {Buffer|null}
+	   * @type {Buffer[]}
 	   */
-	  buffer = null
+	  chunks = []
 
+	  chunkIndex = 0
 	  pos = 0
+	  lineChunkIndex = 0
+	  linePos = 0
 
 	  event = {
 	    data: undefined,
@@ -37133,92 +37529,20 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    // Cache the chunk in the buffer, as the data might not be complete while
-	    // processing it
-	    // TODO: Investigate if there is a more performant way to handle
-	    // incoming chunks
-	    // see: https://github.com/nodejs/undici/issues/2630
-	    if (this.buffer) {
-	      this.buffer = Buffer.concat([this.buffer, chunk]);
-	    } else {
-	      this.buffer = chunk;
-	    }
+	    this.chunks.push(chunk);
 
 	    // Strip leading byte-order-mark if we opened the stream and started
 	    // the processing of the incoming data
 	    if (this.checkBOM) {
-	      switch (this.buffer.length) {
-	        case 1:
-	          // Check if the first byte is the same as the first byte of the BOM
-	          if (this.buffer[0] === BOM[0]) {
-	            // If it is, we need to wait for more data
-	            callback();
-	            return
-	          }
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-
-	          // The buffer only contains one byte so we need to wait for more data
-	          callback();
-	          return
-	        case 2:
-	          // Check if the first two bytes are the same as the first two bytes
-	          // of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1]
-	          ) {
-	            // If it is, we need to wait for more data, because the third byte
-	            // is needed to determine if it is the BOM or not
-	            callback();
-	            return
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-	          break
-	        case 3:
-	          // Check if the first three bytes are the same as the first three
-	          // bytes of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // If it is, we can drop the buffered data, as it is only the BOM
-	            this.buffer = Buffer.alloc(0);
-	            // Set the checkBOM flag to false as we don't need to check for the
-	            // BOM anymore
-	            this.checkBOM = false;
-
-	            // Await more data
-	            callback();
-	            return
-	          }
-	          // If it is not the BOM, we can start processing the data
-	          this.checkBOM = false;
-	          break
-	        default:
-	          // The buffer is longer than 3 bytes, so we can drop the BOM if it is
-	          // present
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // Remove the BOM from the buffer
-	            this.buffer = this.buffer.subarray(3);
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          this.checkBOM = false;
-	          break
+	      if (this.handleBOM()) {
+	        callback();
+	        return
 	      }
 	    }
 
-	    while (this.pos < this.buffer.length) {
+	    while (this.hasCurrentByte()) {
+	      const byte = this.currentByte();
+
 	      // If the previous line ended with an end-of-line, we need to check
 	      // if the next character is also an end-of-line.
 	      if (this.eventEndCheck) {
@@ -37231,10 +37555,9 @@ function requireEventsourceStream () {
 	        if (this.crlfCheck) {
 	          // If the current character is a line feed, we can remove it
 	          // from the buffer and reset the crlfCheck flag
-	          if (this.buffer[this.pos] === LF) {
-	            this.buffer = this.buffer.subarray(this.pos + 1);
-	            this.pos = 0;
+	          if (byte === LF) {
 	            this.crlfCheck = false;
+	            this.consumeCurrentByte();
 
 	            // It is possible that the line feed is not the end of the
 	            // event. We need to check if the next character is an
@@ -37250,19 +37573,17 @@ function requireEventsourceStream () {
 	          this.crlfCheck = false;
 	        }
 
-	        if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	        if (byte === LF || byte === CR) {
 	          // If the current character is a carriage return, we need to
 	          // set the crlfCheck flag to true, as we need to check if the
 	          // next character is a line feed so we can remove it from the
 	          // buffer
-	          if (this.buffer[this.pos] === CR) {
+	          if (byte === CR) {
 	            this.crlfCheck = true;
 	          }
 
-	          this.buffer = this.buffer.subarray(this.pos + 1);
-	          this.pos = 0;
-	          if (
-	            this.event.data !== undefined || this.event.event || this.event.id !== undefined || this.event.retry) {
+	          this.consumeCurrentByte();
+	          if (this.hasPendingEvent()) {
 	            this.processEvent(this.event);
 	          }
 	          this.clearEvent();
@@ -37276,22 +37597,18 @@ function requireEventsourceStream () {
 
 	      // If the current character is an end-of-line, we can process the
 	      // line
-	      if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	      if (byte === LF || byte === CR) {
 	        // If the current character is a carriage return, we need to
 	        // set the crlfCheck flag to true, as we need to check if the
 	        // next character is a line feed
-	        if (this.buffer[this.pos] === CR) {
+	        if (byte === CR) {
 	          this.crlfCheck = true;
 	        }
 
 	        // In any case, we can process the line as we reached an
 	        // end-of-line character
-	        this.parseLine(this.buffer.subarray(0, this.pos), this.event);
-
-	        // Remove the processed line from the buffer
-	        this.buffer = this.buffer.subarray(this.pos + 1);
-	        // Reset the position as we removed the processed line from the buffer
-	        this.pos = 0;
+	        this.parseLine(this.readLine(), this.event);
+	        this.consumeCurrentByte();
 	        // A line was processed and this could be the end of the event. We need
 	        // to check if the next line is empty to determine if the event is
 	        // finished.
@@ -37299,7 +37616,7 @@ function requireEventsourceStream () {
 	        continue
 	      }
 
-	      this.pos++;
+	      this.advanceCursor();
 	    }
 
 	    callback();
@@ -37324,64 +37641,53 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    let field = '';
-	    let value = '';
+	    let fieldLength = line.length;
+	    let valueStart = line.length;
 
 	    // If the line contains a U+003A COLON character (:)
 	    if (colonPosition !== -1) {
-	      // Collect the characters on the line before the first U+003A COLON
-	      // character (:), and let field be that string.
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // field
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      field = line.subarray(0, colonPosition).toString('utf8');
+	      fieldLength = colonPosition;
 
 	      // Collect the characters on the line after the first U+003A COLON
 	      // character (:), and let value be that string.
 	      // If value starts with a U+0020 SPACE character, remove it from value.
-	      let valueStart = colonPosition + 1;
+	      valueStart = colonPosition + 1;
 	      if (line[valueStart] === SPACE) {
 	        ++valueStart;
 	      }
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // value
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      value = line.subarray(valueStart).toString('utf8');
-
-	      // Otherwise, the string is not empty but does not contain a U+003A COLON
-	      // character (:)
-	    } else {
-	      // Process the field using the steps described below, using the whole
-	      // line as the field name, and the empty string as the field value.
-	      field = line.toString('utf8');
-	      value = '';
 	    }
 
-	    // Modify the event with the field name and value. The value is also
-	    // decoded as UTF-8
-	    switch (field) {
-	      case 'data':
-	        if (event[field] === undefined) {
-	          event[field] = value;
-	        } else {
-	          event[field] += `\n${value}`;
-	        }
-	        break
-	      case 'retry':
-	        if (isASCIINumber(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'id':
-	        if (isValidLastEventId(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'event':
-	        if (value.length > 0) {
-	          event[field] = value;
-	        }
-	        break
+	    if (isFieldName(line, fieldLength, DATA)) {
+	      const value = line.toString('utf8', valueStart);
+
+	      if (event.data === undefined) {
+	        event.data = value;
+	      } else {
+	        event.data += `\n${value}`;
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, RETRY)) {
+	      if (isASCIINumberBytes(line, valueStart)) {
+	        event.retry = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, ID)) {
+	      if (isValidLastEventIdBytes(line, valueStart)) {
+	        event.id = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, EVENT)) {
+	      const value = line.toString('utf8', valueStart);
+
+	      if (value.length > 0) {
+	        event.event = value;
+	      }
 	    }
 	  }
 
@@ -37411,12 +37717,151 @@ function requireEventsourceStream () {
 	  }
 
 	  clearEvent () {
-	    this.event = {
-	      data: undefined,
-	      event: undefined,
-	      id: undefined,
-	      retry: undefined
-	    };
+	    this.event.data = undefined;
+	    this.event.event = undefined;
+	    this.event.id = undefined;
+	    this.event.retry = undefined;
+	  }
+
+	  hasPendingEvent () {
+	    return this.event.data !== undefined ||
+	      this.event.event !== undefined ||
+	      this.event.id !== undefined ||
+	      this.event.retry !== undefined
+	  }
+
+	  hasCurrentByte () {
+	    return this.chunkIndex < this.chunks.length &&
+	      this.pos < this.chunks[this.chunkIndex].length
+	  }
+
+	  currentByte () {
+	    return this.chunks[this.chunkIndex][this.pos]
+	  }
+
+	  consumeCurrentByte () {
+	    this.advanceCursor();
+	    this.syncLineStartToCursor();
+	  }
+
+	  advanceCursor () {
+	    this.pos++;
+
+	    while (this.chunkIndex < this.chunks.length && this.pos >= this.chunks[this.chunkIndex].length) {
+	      this.chunkIndex++;
+	      this.pos = 0;
+	    }
+	  }
+
+	  syncLineStartToCursor () {
+	    this.lineChunkIndex = this.chunkIndex;
+	    this.linePos = this.pos;
+	    this.dropConsumedChunks();
+	  }
+
+	  dropConsumedChunks () {
+	    while (this.lineChunkIndex > 0) {
+	      this.chunks.shift();
+	      this.lineChunkIndex--;
+	      this.chunkIndex--;
+	    }
+
+	    if (this.chunkIndex === this.chunks.length) {
+	      this.chunks.length = 0;
+	      this.chunkIndex = 0;
+	      this.pos = 0;
+	      this.lineChunkIndex = 0;
+	      this.linePos = 0;
+	    }
+	  }
+
+	  readLine () {
+	    if (this.lineChunkIndex === this.chunkIndex) {
+	      return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos)
+	    }
+
+	    const chunks = [];
+	    let length = 0;
+
+	    for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+	      const chunk = this.chunks[i];
+	      const start = i === this.lineChunkIndex ? this.linePos : 0;
+	      const end = i === this.chunkIndex ? this.pos : chunk.length;
+	      const slice = chunk.subarray(start, end);
+	      length += slice.length;
+	      chunks.push(slice);
+	    }
+
+	    return Buffer.concat(chunks, length)
+	  }
+
+	  peekBufferedByte (offset) {
+	    let chunkIndex = this.lineChunkIndex;
+	    let pos = this.linePos;
+
+	    while (chunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[chunkIndex];
+	      const remaining = chunk.length - pos;
+
+	      if (offset < remaining) {
+	        return chunk[pos + offset]
+	      }
+
+	      offset -= remaining;
+	      chunkIndex++;
+	      pos = 0;
+	    }
+	  }
+
+	  discardLeadingBytes (count) {
+	    while (count > 0 && this.lineChunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[this.lineChunkIndex];
+	      const remaining = chunk.length - this.linePos;
+
+	      if (count < remaining) {
+	        this.linePos += count;
+	        count = 0;
+	      } else {
+	        count -= remaining;
+	        this.lineChunkIndex++;
+	        this.linePos = 0;
+	      }
+	    }
+
+	    this.chunkIndex = this.lineChunkIndex;
+	    this.pos = this.linePos;
+	    this.dropConsumedChunks();
+	  }
+
+	  handleBOM () {
+	    const first = this.peekBufferedByte(0);
+	    const second = this.peekBufferedByte(1);
+	    const third = this.peekBufferedByte(2);
+
+	    if (second === undefined) {
+	      if (first === BOM[0]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return true
+	    }
+
+	    if (third === undefined) {
+	      if (first === BOM[0] && second === BOM[1]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return false
+	    }
+
+	    if (first === BOM[0] && second === BOM[1] && third === BOM[2]) {
+	      this.discardLeadingBytes(3);
+	    }
+
+	    this.checkBOM = false;
+	    return !this.hasCurrentByte()
 	  }
 	}
 
@@ -38183,7 +38628,7 @@ function requireUndici () {
 var undiciExports = requireUndici();
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$f = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38192,7 +38637,7 @@ var undiciExports = requireUndici();
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var HttpCodes$2;
+var HttpCodes;
 (function (HttpCodes) {
     HttpCodes[HttpCodes["OK"] = 200] = "OK";
     HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
@@ -38221,30 +38666,647 @@ var HttpCodes$2;
     HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
     HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
     HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes$2 || (HttpCodes$2 = {}));
-var Headers$2;
+})(HttpCodes || (HttpCodes = {}));
+var Headers;
 (function (Headers) {
     Headers["Accept"] = "accept";
     Headers["ContentType"] = "content-type";
-})(Headers$2 || (Headers$2 = {}));
-var MediaTypes$2;
+})(Headers || (Headers = {}));
+var MediaTypes;
 (function (MediaTypes) {
     MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes$2 || (MediaTypes$2 = {}));
-[
-    HttpCodes$2.MovedPermanently,
-    HttpCodes$2.ResourceMoved,
-    HttpCodes$2.SeeOther,
-    HttpCodes$2.TemporaryRedirect,
-    HttpCodes$2.PermanentRedirect
+})(MediaTypes || (MediaTypes = {}));
+const HttpRedirectCodes = [
+    HttpCodes.MovedPermanently,
+    HttpCodes.ResourceMoved,
+    HttpCodes.SeeOther,
+    HttpCodes.TemporaryRedirect,
+    HttpCodes.PermanentRedirect
 ];
-[
-    HttpCodes$2.BadGateway,
-    HttpCodes$2.ServiceUnavailable,
-    HttpCodes$2.GatewayTimeout
+const HttpResponseRetryCodes = [
+    HttpCodes.BadGateway,
+    HttpCodes.ServiceUnavailable,
+    HttpCodes.GatewayTimeout
 ];
+const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
+const ExponentialBackoffCeiling = 10;
+const ExponentialBackoffTimeSlice = 5;
+class HttpClientError extends Error {
+    constructor(message, statusCode) {
+        super(message);
+        this.name = 'HttpClientError';
+        this.statusCode = statusCode;
+        Object.setPrototypeOf(this, HttpClientError.prototype);
+    }
+}
+class HttpClientResponse {
+    constructor(message) {
+        this.message = message;
+    }
+    readBody() {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$f(this, void 0, void 0, function* () {
+                let output = Buffer.alloc(0);
+                this.message.on('data', (chunk) => {
+                    output = Buffer.concat([output, chunk]);
+                });
+                this.message.on('end', () => {
+                    resolve(output.toString());
+                });
+            }));
+        });
+    }
+    readBodyBuffer() {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$f(this, void 0, void 0, function* () {
+                const chunks = [];
+                this.message.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+                this.message.on('end', () => {
+                    resolve(Buffer.concat(chunks));
+                });
+            }));
+        });
+    }
+}
+class HttpClient {
+    constructor(userAgent, handlers, requestOptions) {
+        this._ignoreSslError = false;
+        this._allowRedirects = true;
+        this._allowRedirectDowngrade = false;
+        this._maxRedirects = 50;
+        this._allowRetries = false;
+        this._maxRetries = 1;
+        this._keepAlive = false;
+        this._disposed = false;
+        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
+        this.handlers = handlers || [];
+        this.requestOptions = requestOptions;
+        if (requestOptions) {
+            if (requestOptions.ignoreSslError != null) {
+                this._ignoreSslError = requestOptions.ignoreSslError;
+            }
+            this._socketTimeout = requestOptions.socketTimeout;
+            if (requestOptions.allowRedirects != null) {
+                this._allowRedirects = requestOptions.allowRedirects;
+            }
+            if (requestOptions.allowRedirectDowngrade != null) {
+                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
+            }
+            if (requestOptions.maxRedirects != null) {
+                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
+            }
+            if (requestOptions.keepAlive != null) {
+                this._keepAlive = requestOptions.keepAlive;
+            }
+            if (requestOptions.allowRetries != null) {
+                this._allowRetries = requestOptions.allowRetries;
+            }
+            if (requestOptions.maxRetries != null) {
+                this._maxRetries = requestOptions.maxRetries;
+            }
+        }
+    }
+    options(requestUrl, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    get(requestUrl, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('GET', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    del(requestUrl, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    post(requestUrl, data, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('POST', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    patch(requestUrl, data, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    put(requestUrl, data, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('PUT', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    head(requestUrl, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    sendStream(verb, requestUrl, stream, additionalHeaders) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return this.request(verb, requestUrl, stream, additionalHeaders);
+        });
+    }
+    /**
+     * Gets a typed object from an endpoint
+     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
+     */
+    getJson(requestUrl_1) {
+        return __awaiter$f(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            const res = yield this.get(requestUrl, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    postJson(requestUrl_1, obj_1) {
+        return __awaiter$f(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.post(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    putJson(requestUrl_1, obj_1) {
+        return __awaiter$f(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.put(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    patchJson(requestUrl_1, obj_1) {
+        return __awaiter$f(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.patch(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    /**
+     * Makes a raw http request.
+     * All other methods such as get, post, patch, and request ultimately call this.
+     * Prefer get, del, post and patch
+     */
+    request(verb, requestUrl, data, headers) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            if (this._disposed) {
+                throw new Error('Client has already been disposed.');
+            }
+            const parsedUrl = new URL(requestUrl);
+            let info = this._prepareRequest(verb, parsedUrl, headers);
+            // Only perform retries on reads since writes may not be idempotent.
+            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
+                ? this._maxRetries + 1
+                : 1;
+            let numTries = 0;
+            let response;
+            do {
+                response = yield this.requestRaw(info, data);
+                // Check if it's an authentication challenge
+                if (response &&
+                    response.message &&
+                    response.message.statusCode === HttpCodes.Unauthorized) {
+                    let authenticationHandler;
+                    for (const handler of this.handlers) {
+                        if (handler.canHandleAuthentication(response)) {
+                            authenticationHandler = handler;
+                            break;
+                        }
+                    }
+                    if (authenticationHandler) {
+                        return authenticationHandler.handleAuthentication(this, info, data);
+                    }
+                    else {
+                        // We have received an unauthorized response but have no handlers to handle it.
+                        // Let the response return to the caller.
+                        return response;
+                    }
+                }
+                let redirectsRemaining = this._maxRedirects;
+                while (response.message.statusCode &&
+                    HttpRedirectCodes.includes(response.message.statusCode) &&
+                    this._allowRedirects &&
+                    redirectsRemaining > 0) {
+                    const redirectUrl = response.message.headers['location'];
+                    if (!redirectUrl) {
+                        // if there's no location to redirect to, we won't
+                        break;
+                    }
+                    const parsedRedirectUrl = new URL(redirectUrl);
+                    if (parsedUrl.protocol === 'https:' &&
+                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
+                        !this._allowRedirectDowngrade) {
+                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
+                    }
+                    // we need to finish reading the response before reassigning response
+                    // which will leak the open socket.
+                    yield response.readBody();
+                    // strip authorization header if redirected to a different hostname
+                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
+                        for (const header in headers) {
+                            // header names are case insensitive
+                            if (header.toLowerCase() === 'authorization') {
+                                delete headers[header];
+                            }
+                        }
+                    }
+                    // let's make the request with the new redirectUrl
+                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
+                    response = yield this.requestRaw(info, data);
+                    redirectsRemaining--;
+                }
+                if (!response.message.statusCode ||
+                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
+                    // If not a retry code, return immediately instead of retrying
+                    return response;
+                }
+                numTries += 1;
+                if (numTries < maxTries) {
+                    yield response.readBody();
+                    yield this._performExponentialBackoff(numTries);
+                }
+            } while (numTries < maxTries);
+            return response;
+        });
+    }
+    /**
+     * Needs to be called if keepAlive is set to true in request options.
+     */
+    dispose() {
+        if (this._agent) {
+            this._agent.destroy();
+        }
+        this._disposed = true;
+    }
+    /**
+     * Raw request.
+     * @param info
+     * @param data
+     */
+    requestRaw(info, data) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => {
+                function callbackForResult(err, res) {
+                    if (err) {
+                        reject(err);
+                    }
+                    else if (!res) {
+                        // If `err` is not passed, then `res` must be passed.
+                        reject(new Error('Unknown error'));
+                    }
+                    else {
+                        resolve(res);
+                    }
+                }
+                this.requestRawWithCallback(info, data, callbackForResult);
+            });
+        });
+    }
+    /**
+     * Raw request with callback.
+     * @param info
+     * @param data
+     * @param onResult
+     */
+    requestRawWithCallback(info, data, onResult) {
+        if (typeof data === 'string') {
+            if (!info.options.headers) {
+                info.options.headers = {};
+            }
+            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
+        }
+        let callbackCalled = false;
+        function handleResult(err, res) {
+            if (!callbackCalled) {
+                callbackCalled = true;
+                onResult(err, res);
+            }
+        }
+        const req = info.httpModule.request(info.options, (msg) => {
+            const res = new HttpClientResponse(msg);
+            handleResult(undefined, res);
+        });
+        let socket;
+        req.on('socket', sock => {
+            socket = sock;
+        });
+        // If we ever get disconnected, we want the socket to timeout eventually
+        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
+            if (socket) {
+                socket.end();
+            }
+            handleResult(new Error(`Request timeout: ${info.options.path}`));
+        });
+        req.on('error', function (err) {
+            // err has statusCode property
+            // res should have headers
+            handleResult(err);
+        });
+        if (data && typeof data === 'string') {
+            req.write(data, 'utf8');
+        }
+        if (data && typeof data !== 'string') {
+            data.on('close', function () {
+                req.end();
+            });
+            data.pipe(req);
+        }
+        else {
+            req.end();
+        }
+    }
+    /**
+     * Gets an http agent. This function is useful when you need an http agent that handles
+     * routing through a proxy server - depending upon the url and proxy environment variables.
+     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
+     */
+    getAgent(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        return this._getAgent(parsedUrl);
+    }
+    getAgentDispatcher(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (!useProxy) {
+            return;
+        }
+        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
+    }
+    _prepareRequest(method, requestUrl, headers) {
+        const info = {};
+        info.parsedUrl = requestUrl;
+        const usingSsl = info.parsedUrl.protocol === 'https:';
+        info.httpModule = usingSsl ? require$$1 : http;
+        const defaultPort = usingSsl ? 443 : 80;
+        info.options = {};
+        info.options.host = info.parsedUrl.hostname;
+        info.options.port = info.parsedUrl.port
+            ? parseInt(info.parsedUrl.port)
+            : defaultPort;
+        info.options.path =
+            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
+        info.options.method = method;
+        info.options.headers = this._mergeHeaders(headers);
+        if (this.userAgent != null) {
+            info.options.headers['user-agent'] = this.userAgent;
+        }
+        info.options.agent = this._getAgent(info.parsedUrl);
+        // gives handlers an opportunity to participate
+        if (this.handlers) {
+            for (const handler of this.handlers) {
+                handler.prepareRequest(info.options);
+            }
+        }
+        return info;
+    }
+    _mergeHeaders(headers) {
+        if (this.requestOptions && this.requestOptions.headers) {
+            return Object.assign({}, lowercaseKeys$2(this.requestOptions.headers), lowercaseKeys$2(headers || {}));
+        }
+        return lowercaseKeys$2(headers || {});
+    }
+    /**
+     * Gets an existing header value or returns a default.
+     * Handles converting number header values to strings since HTTP headers must be strings.
+     * Note: This returns string | string[] since some headers can have multiple values.
+     * For headers that must always be a single string (like Content-Type), use the
+     * specialized _getExistingOrDefaultContentTypeHeader method instead.
+     */
+    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys$2(this.requestOptions.headers)[header];
+            if (headerValue) {
+                clientHeader =
+                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
+            }
+        }
+        const additionalValue = additionalHeaders[header];
+        if (additionalValue !== undefined) {
+            return typeof additionalValue === 'number'
+                ? additionalValue.toString()
+                : additionalValue;
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    /**
+     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
+     * Always returns a single string (not an array) since Content-Type should be a single value.
+     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
+     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
+     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
+     */
+    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys$2(this.requestOptions.headers)[Headers.ContentType];
+            if (headerValue) {
+                if (typeof headerValue === 'number') {
+                    clientHeader = String(headerValue);
+                }
+                else if (Array.isArray(headerValue)) {
+                    clientHeader = headerValue.join(', ');
+                }
+                else {
+                    clientHeader = headerValue;
+                }
+            }
+        }
+        const additionalValue = additionalHeaders[Headers.ContentType];
+        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
+        if (additionalValue !== undefined) {
+            if (typeof additionalValue === 'number') {
+                return String(additionalValue);
+            }
+            else if (Array.isArray(additionalValue)) {
+                return additionalValue.join(', ');
+            }
+            else {
+                return additionalValue;
+            }
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    _getAgent(parsedUrl) {
+        let agent;
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (this._keepAlive && useProxy) {
+            agent = this._proxyAgent;
+        }
+        if (!useProxy) {
+            agent = this._agent;
+        }
+        // if agent is already assigned use that agent.
+        if (agent) {
+            return agent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        let maxSockets = 100;
+        if (this.requestOptions) {
+            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
+        }
+        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
+        if (proxyUrl && proxyUrl.hostname) {
+            const agentOptions = {
+                maxSockets,
+                keepAlive: this._keepAlive,
+                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
+                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
+                })), { host: proxyUrl.hostname, port: proxyUrl.port })
+            };
+            let tunnelAgent;
+            const overHttps = proxyUrl.protocol === 'https:';
+            if (usingSsl) {
+                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
+            }
+            else {
+                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
+            }
+            agent = tunnelAgent(agentOptions);
+            this._proxyAgent = agent;
+        }
+        // if tunneling agent isn't assigned create a new agent
+        if (!agent) {
+            const options = { keepAlive: this._keepAlive, maxSockets };
+            agent = usingSsl ? new require$$1.Agent(options) : new http.Agent(options);
+            this._agent = agent;
+        }
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            agent.options = Object.assign(agent.options || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return agent;
+    }
+    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
+        let proxyAgent;
+        if (this._keepAlive) {
+            proxyAgent = this._proxyAgentDispatcher;
+        }
+        // if agent is already assigned use that agent.
+        if (proxyAgent) {
+            return proxyAgent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
+            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
+        })));
+        this._proxyAgentDispatcher = proxyAgent;
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return proxyAgent;
+    }
+    _getUserAgentWithOrchestrationId(userAgent) {
+        const baseUserAgent = userAgent || 'actions/http-client';
+        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
+        if (orchId) {
+            // Sanitize the orchestration ID to ensure it contains only valid characters
+            // Valid characters: 0-9, a-z, _, -, .
+            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
+            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
+        }
+        return baseUserAgent;
+    }
+    _performExponentialBackoff(retryNumber) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
+            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
+            return new Promise(resolve => setTimeout(() => resolve(), ms));
+        });
+    }
+    _processResponse(res, options) {
+        return __awaiter$f(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => __awaiter$f(this, void 0, void 0, function* () {
+                const statusCode = res.message.statusCode || 0;
+                const response = {
+                    statusCode,
+                    result: null,
+                    headers: {}
+                };
+                // not found leads to null obj returned
+                if (statusCode === HttpCodes.NotFound) {
+                    resolve(response);
+                }
+                // get the result from the body
+                function dateTimeDeserializer(key, value) {
+                    if (typeof value === 'string') {
+                        const a = new Date(value);
+                        if (!isNaN(a.valueOf())) {
+                            return a;
+                        }
+                    }
+                    return value;
+                }
+                let obj;
+                let contents;
+                try {
+                    contents = yield res.readBody();
+                    if (contents && contents.length > 0) {
+                        if (options && options.deserializeDates) {
+                            obj = JSON.parse(contents, dateTimeDeserializer);
+                        }
+                        else {
+                            obj = JSON.parse(contents);
+                        }
+                        response.result = obj;
+                    }
+                    response.headers = res.message.headers;
+                }
+                catch (err) {
+                    // Invalid resource (contents not json);  leaving result obj null
+                }
+                // note that 3xx redirects are handled by the http layer.
+                if (statusCode > 299) {
+                    let msg;
+                    // if exception/error in body, attempt to get better error
+                    if (obj && obj.message) {
+                        msg = obj.message;
+                    }
+                    else if (contents && contents.length > 0) {
+                        // it may be the case that the exception is in the body message as string
+                        msg = contents;
+                    }
+                    else {
+                        msg = `Failed request: (${statusCode})`;
+                    }
+                    const err = new HttpClientError(msg, statusCode);
+                    err.result = response.result;
+                    reject(err);
+                }
+                else {
+                    resolve(response);
+                }
+            }));
+        });
+    }
+}
+const lowercaseKeys$2 = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$e = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38253,6 +39315,28 @@ var MediaTypes$2;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+class BearerCredentialHandler {
+    constructor(token) {
+        this.token = token;
+    }
+    // currently implements pre-authorization
+    // TODO: support preAuth = false where it hooks on 401
+    prepareRequest(options) {
+        if (!options.headers) {
+            throw Error('The request has no headers');
+        }
+        options.headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    // This handler cannot handle 401
+    canHandleAuthentication() {
+        return false;
+    }
+    handleAuthentication() {
+        return __awaiter$e(this, void 0, void 0, function* () {
+            throw new Error('not implemented');
+        });
+    }
+}
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -38284,12 +39368,12 @@ const { access: access$1, appendFile, writeFile } = promises$1;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-const { chmod: chmod$1, copyFile: copyFile$1, lstat: lstat$1, mkdir: mkdir$1, open: open$1, readdir: readdir$1, rename: rename$1, rm: rm$1, rmdir: rmdir$1, stat: stat$1, symlink: symlink$1, unlink: unlink$1 } = fs.promises;
+const { chmod, copyFile, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
 // export const {open} = 'fs'
-process.platform === 'win32';
+const IS_WINDOWS = process.platform === 'win32';
 fs.constants.O_RDONLY;
 
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$d = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38298,6 +39382,47 @@ fs.constants.O_RDONLY;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+/**
+ * Remove a path recursively with force
+ *
+ * @param inputPath path to remove
+ */
+function rmRF(inputPath) {
+    return __awaiter$d(this, void 0, void 0, function* () {
+        if (IS_WINDOWS) {
+            // Check for invalid characters
+            // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+            if (/[*"<>|]/.test(inputPath)) {
+                throw new Error('File path must not contain `*`, `"`, `<`, `>` or `|` on Windows');
+            }
+        }
+        try {
+            // note if path does not exist, error is silent
+            yield rm(inputPath, {
+                force: true,
+                maxRetries: 3,
+                recursive: true,
+                retryDelay: 300
+            });
+        }
+        catch (err) {
+            throw new Error(`File was unable to be removed ${err}`);
+        }
+    });
+}
+/**
+ * Make a directory.  Creates the full path with folders in between
+ * Will throw if it fails
+ *
+ * @param   fsPath        path to create
+ * @returns Promise<void>
+ */
+function mkdirP(fsPath) {
+    return __awaiter$d(this, void 0, void 0, function* () {
+        ok(fsPath, 'a path argument must be provided');
+        yield mkdir(fsPath, { recursive: true });
+    });
+}
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -38530,6 +39655,8 @@ function getAndValidateInputs() {
     let iqServerUrl = getInput('iq-server-url');
     const username = getInput('username');
     const password = getInput('password');
+    const proxy = getInput('proxy');
+    const proxyUser = getInput('proxy-user');
     // Validate required inputs
     if (!username || !password) {
         throw new Error('Username and password are required for authentication.');
@@ -38589,73 +39716,10 @@ function getAndValidateInputs() {
         pushDependencyGraph,
         iqServerUrl,
         username,
-        password
+        password,
+        proxy,
+        proxyUser
     };
-}
-
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-const { chmod, copyFile, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
-// export const {open} = 'fs'
-const IS_WINDOWS = process.platform === 'win32';
-fs.constants.O_RDONLY;
-
-var __awaiter$g = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-/**
- * Remove a path recursively with force
- *
- * @param inputPath path to remove
- */
-function rmRF(inputPath) {
-    return __awaiter$g(this, void 0, void 0, function* () {
-        if (IS_WINDOWS) {
-            // Check for invalid characters
-            // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
-            if (/[*"<>|]/.test(inputPath)) {
-                throw new Error('File path must not contain `*`, `"`, `<`, `>` or `|` on Windows');
-            }
-        }
-        try {
-            // note if path does not exist, error is silent
-            yield rm(inputPath, {
-                force: true,
-                maxRetries: 3,
-                recursive: true,
-                retryDelay: 300
-            });
-        }
-        catch (err) {
-            throw new Error(`File was unable to be removed ${err}`);
-        }
-    });
-}
-/**
- * Make a directory.  Creates the full path with folders in between
- * Will throw if it fails
- *
- * @param   fsPath        path to create
- * @returns Promise<void>
- */
-function mkdirP(fsPath) {
-    return __awaiter$g(this, void 0, void 0, function* () {
-        ok(fsPath, 'a path argument must be provided');
-        yield mkdir(fsPath, { recursive: true });
-    });
 }
 
 var re = {exports: {}};
@@ -41483,776 +42547,7 @@ requireSemver();
     });
 };
 
-function getProxyUrl$1(reqUrl) {
-    const usingSsl = reqUrl.protocol === 'https:';
-    if (checkBypass$1(reqUrl)) {
-        return undefined;
-    }
-    const proxyVar = (() => {
-        if (usingSsl) {
-            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
-        }
-        else {
-            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
-        }
-    })();
-    if (proxyVar) {
-        try {
-            return new DecodedURL$1(proxyVar);
-        }
-        catch (_a) {
-            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
-                return new DecodedURL$1(`http://${proxyVar}`);
-        }
-    }
-    else {
-        return undefined;
-    }
-}
-function checkBypass$1(reqUrl) {
-    if (!reqUrl.hostname) {
-        return false;
-    }
-    const reqHost = reqUrl.hostname;
-    if (isLoopbackAddress$1(reqHost)) {
-        return true;
-    }
-    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
-    if (!noProxy) {
-        return false;
-    }
-    // Determine the request port
-    let reqPort;
-    if (reqUrl.port) {
-        reqPort = Number(reqUrl.port);
-    }
-    else if (reqUrl.protocol === 'http:') {
-        reqPort = 80;
-    }
-    else if (reqUrl.protocol === 'https:') {
-        reqPort = 443;
-    }
-    // Format the request hostname and hostname with port
-    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
-    if (typeof reqPort === 'number') {
-        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
-    }
-    // Compare request host against noproxy
-    for (const upperNoProxyItem of noProxy
-        .split(',')
-        .map(x => x.trim().toUpperCase())
-        .filter(x => x)) {
-        if (upperNoProxyItem === '*' ||
-            upperReqHosts.some(x => x === upperNoProxyItem ||
-                x.endsWith(`.${upperNoProxyItem}`) ||
-                (upperNoProxyItem.startsWith('.') &&
-                    x.endsWith(`${upperNoProxyItem}`)))) {
-            return true;
-        }
-    }
-    return false;
-}
-function isLoopbackAddress$1(host) {
-    const hostLower = host.toLowerCase();
-    return (hostLower === 'localhost' ||
-        hostLower.startsWith('127.') ||
-        hostLower.startsWith('[::1]') ||
-        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
-}
-let DecodedURL$1 = class DecodedURL extends URL {
-    constructor(url, base) {
-        super(url, base);
-        this._decodedUsername = decodeURIComponent(super.username);
-        this._decodedPassword = decodeURIComponent(super.password);
-    }
-    get username() {
-        return this._decodedUsername;
-    }
-    get password() {
-        return this._decodedPassword;
-    }
-};
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-var __awaiter$f = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var HttpCodes$1;
-(function (HttpCodes) {
-    HttpCodes[HttpCodes["OK"] = 200] = "OK";
-    HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
-    HttpCodes[HttpCodes["MovedPermanently"] = 301] = "MovedPermanently";
-    HttpCodes[HttpCodes["ResourceMoved"] = 302] = "ResourceMoved";
-    HttpCodes[HttpCodes["SeeOther"] = 303] = "SeeOther";
-    HttpCodes[HttpCodes["NotModified"] = 304] = "NotModified";
-    HttpCodes[HttpCodes["UseProxy"] = 305] = "UseProxy";
-    HttpCodes[HttpCodes["SwitchProxy"] = 306] = "SwitchProxy";
-    HttpCodes[HttpCodes["TemporaryRedirect"] = 307] = "TemporaryRedirect";
-    HttpCodes[HttpCodes["PermanentRedirect"] = 308] = "PermanentRedirect";
-    HttpCodes[HttpCodes["BadRequest"] = 400] = "BadRequest";
-    HttpCodes[HttpCodes["Unauthorized"] = 401] = "Unauthorized";
-    HttpCodes[HttpCodes["PaymentRequired"] = 402] = "PaymentRequired";
-    HttpCodes[HttpCodes["Forbidden"] = 403] = "Forbidden";
-    HttpCodes[HttpCodes["NotFound"] = 404] = "NotFound";
-    HttpCodes[HttpCodes["MethodNotAllowed"] = 405] = "MethodNotAllowed";
-    HttpCodes[HttpCodes["NotAcceptable"] = 406] = "NotAcceptable";
-    HttpCodes[HttpCodes["ProxyAuthenticationRequired"] = 407] = "ProxyAuthenticationRequired";
-    HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
-    HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
-    HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
-    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
-    HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
-    HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
-    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
-    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
-    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes$1 || (HttpCodes$1 = {}));
-var Headers$1;
-(function (Headers) {
-    Headers["Accept"] = "accept";
-    Headers["ContentType"] = "content-type";
-})(Headers$1 || (Headers$1 = {}));
-var MediaTypes$1;
-(function (MediaTypes) {
-    MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes$1 || (MediaTypes$1 = {}));
-const HttpRedirectCodes$1 = [
-    HttpCodes$1.MovedPermanently,
-    HttpCodes$1.ResourceMoved,
-    HttpCodes$1.SeeOther,
-    HttpCodes$1.TemporaryRedirect,
-    HttpCodes$1.PermanentRedirect
-];
-const HttpResponseRetryCodes$1 = [
-    HttpCodes$1.BadGateway,
-    HttpCodes$1.ServiceUnavailable,
-    HttpCodes$1.GatewayTimeout
-];
-const RetryableHttpVerbs$1 = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
-const ExponentialBackoffCeiling$1 = 10;
-const ExponentialBackoffTimeSlice$1 = 5;
-let HttpClientError$1 = class HttpClientError extends Error {
-    constructor(message, statusCode) {
-        super(message);
-        this.name = 'HttpClientError';
-        this.statusCode = statusCode;
-        Object.setPrototypeOf(this, HttpClientError.prototype);
-    }
-};
-let HttpClientResponse$1 = class HttpClientResponse {
-    constructor(message) {
-        this.message = message;
-    }
-    readBody() {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$f(this, void 0, void 0, function* () {
-                let output = Buffer.alloc(0);
-                this.message.on('data', (chunk) => {
-                    output = Buffer.concat([output, chunk]);
-                });
-                this.message.on('end', () => {
-                    resolve(output.toString());
-                });
-            }));
-        });
-    }
-    readBodyBuffer() {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$f(this, void 0, void 0, function* () {
-                const chunks = [];
-                this.message.on('data', (chunk) => {
-                    chunks.push(chunk);
-                });
-                this.message.on('end', () => {
-                    resolve(Buffer.concat(chunks));
-                });
-            }));
-        });
-    }
-};
-let HttpClient$1 = class HttpClient {
-    constructor(userAgent, handlers, requestOptions) {
-        this._ignoreSslError = false;
-        this._allowRedirects = true;
-        this._allowRedirectDowngrade = false;
-        this._maxRedirects = 50;
-        this._allowRetries = false;
-        this._maxRetries = 1;
-        this._keepAlive = false;
-        this._disposed = false;
-        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
-        this.handlers = handlers || [];
-        this.requestOptions = requestOptions;
-        if (requestOptions) {
-            if (requestOptions.ignoreSslError != null) {
-                this._ignoreSslError = requestOptions.ignoreSslError;
-            }
-            this._socketTimeout = requestOptions.socketTimeout;
-            if (requestOptions.allowRedirects != null) {
-                this._allowRedirects = requestOptions.allowRedirects;
-            }
-            if (requestOptions.allowRedirectDowngrade != null) {
-                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
-            }
-            if (requestOptions.maxRedirects != null) {
-                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
-            }
-            if (requestOptions.keepAlive != null) {
-                this._keepAlive = requestOptions.keepAlive;
-            }
-            if (requestOptions.allowRetries != null) {
-                this._allowRetries = requestOptions.allowRetries;
-            }
-            if (requestOptions.maxRetries != null) {
-                this._maxRetries = requestOptions.maxRetries;
-            }
-        }
-    }
-    options(requestUrl, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    get(requestUrl, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('GET', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    del(requestUrl, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    post(requestUrl, data, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('POST', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    patch(requestUrl, data, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    put(requestUrl, data, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('PUT', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    head(requestUrl, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    sendStream(verb, requestUrl, stream, additionalHeaders) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return this.request(verb, requestUrl, stream, additionalHeaders);
-        });
-    }
-    /**
-     * Gets a typed object from an endpoint
-     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
-     */
-    getJson(requestUrl_1) {
-        return __awaiter$f(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            const res = yield this.get(requestUrl, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    postJson(requestUrl_1, obj_1) {
-        return __awaiter$f(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            additionalHeaders[Headers$1.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes$1.ApplicationJson);
-            const res = yield this.post(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    putJson(requestUrl_1, obj_1) {
-        return __awaiter$f(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            additionalHeaders[Headers$1.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes$1.ApplicationJson);
-            const res = yield this.put(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    patchJson(requestUrl_1, obj_1) {
-        return __awaiter$f(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            additionalHeaders[Headers$1.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes$1.ApplicationJson);
-            const res = yield this.patch(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    /**
-     * Makes a raw http request.
-     * All other methods such as get, post, patch, and request ultimately call this.
-     * Prefer get, del, post and patch
-     */
-    request(verb, requestUrl, data, headers) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            if (this._disposed) {
-                throw new Error('Client has already been disposed.');
-            }
-            const parsedUrl = new URL(requestUrl);
-            let info = this._prepareRequest(verb, parsedUrl, headers);
-            // Only perform retries on reads since writes may not be idempotent.
-            const maxTries = this._allowRetries && RetryableHttpVerbs$1.includes(verb)
-                ? this._maxRetries + 1
-                : 1;
-            let numTries = 0;
-            let response;
-            do {
-                response = yield this.requestRaw(info, data);
-                // Check if it's an authentication challenge
-                if (response &&
-                    response.message &&
-                    response.message.statusCode === HttpCodes$1.Unauthorized) {
-                    let authenticationHandler;
-                    for (const handler of this.handlers) {
-                        if (handler.canHandleAuthentication(response)) {
-                            authenticationHandler = handler;
-                            break;
-                        }
-                    }
-                    if (authenticationHandler) {
-                        return authenticationHandler.handleAuthentication(this, info, data);
-                    }
-                    else {
-                        // We have received an unauthorized response but have no handlers to handle it.
-                        // Let the response return to the caller.
-                        return response;
-                    }
-                }
-                let redirectsRemaining = this._maxRedirects;
-                while (response.message.statusCode &&
-                    HttpRedirectCodes$1.includes(response.message.statusCode) &&
-                    this._allowRedirects &&
-                    redirectsRemaining > 0) {
-                    const redirectUrl = response.message.headers['location'];
-                    if (!redirectUrl) {
-                        // if there's no location to redirect to, we won't
-                        break;
-                    }
-                    const parsedRedirectUrl = new URL(redirectUrl);
-                    if (parsedUrl.protocol === 'https:' &&
-                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
-                        !this._allowRedirectDowngrade) {
-                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
-                    }
-                    // we need to finish reading the response before reassigning response
-                    // which will leak the open socket.
-                    yield response.readBody();
-                    // strip authorization header if redirected to a different hostname
-                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
-                        for (const header in headers) {
-                            // header names are case insensitive
-                            if (header.toLowerCase() === 'authorization') {
-                                delete headers[header];
-                            }
-                        }
-                    }
-                    // let's make the request with the new redirectUrl
-                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
-                    response = yield this.requestRaw(info, data);
-                    redirectsRemaining--;
-                }
-                if (!response.message.statusCode ||
-                    !HttpResponseRetryCodes$1.includes(response.message.statusCode)) {
-                    // If not a retry code, return immediately instead of retrying
-                    return response;
-                }
-                numTries += 1;
-                if (numTries < maxTries) {
-                    yield response.readBody();
-                    yield this._performExponentialBackoff(numTries);
-                }
-            } while (numTries < maxTries);
-            return response;
-        });
-    }
-    /**
-     * Needs to be called if keepAlive is set to true in request options.
-     */
-    dispose() {
-        if (this._agent) {
-            this._agent.destroy();
-        }
-        this._disposed = true;
-    }
-    /**
-     * Raw request.
-     * @param info
-     * @param data
-     */
-    requestRaw(info, data) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => {
-                function callbackForResult(err, res) {
-                    if (err) {
-                        reject(err);
-                    }
-                    else if (!res) {
-                        // If `err` is not passed, then `res` must be passed.
-                        reject(new Error('Unknown error'));
-                    }
-                    else {
-                        resolve(res);
-                    }
-                }
-                this.requestRawWithCallback(info, data, callbackForResult);
-            });
-        });
-    }
-    /**
-     * Raw request with callback.
-     * @param info
-     * @param data
-     * @param onResult
-     */
-    requestRawWithCallback(info, data, onResult) {
-        if (typeof data === 'string') {
-            if (!info.options.headers) {
-                info.options.headers = {};
-            }
-            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
-        }
-        let callbackCalled = false;
-        function handleResult(err, res) {
-            if (!callbackCalled) {
-                callbackCalled = true;
-                onResult(err, res);
-            }
-        }
-        const req = info.httpModule.request(info.options, (msg) => {
-            const res = new HttpClientResponse$1(msg);
-            handleResult(undefined, res);
-        });
-        let socket;
-        req.on('socket', sock => {
-            socket = sock;
-        });
-        // If we ever get disconnected, we want the socket to timeout eventually
-        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
-            if (socket) {
-                socket.end();
-            }
-            handleResult(new Error(`Request timeout: ${info.options.path}`));
-        });
-        req.on('error', function (err) {
-            // err has statusCode property
-            // res should have headers
-            handleResult(err);
-        });
-        if (data && typeof data === 'string') {
-            req.write(data, 'utf8');
-        }
-        if (data && typeof data !== 'string') {
-            data.on('close', function () {
-                req.end();
-            });
-            data.pipe(req);
-        }
-        else {
-            req.end();
-        }
-    }
-    /**
-     * Gets an http agent. This function is useful when you need an http agent that handles
-     * routing through a proxy server - depending upon the url and proxy environment variables.
-     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
-     */
-    getAgent(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        return this._getAgent(parsedUrl);
-    }
-    getAgentDispatcher(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        const proxyUrl = getProxyUrl$1(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (!useProxy) {
-            return;
-        }
-        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
-    }
-    _prepareRequest(method, requestUrl, headers) {
-        const info = {};
-        info.parsedUrl = requestUrl;
-        const usingSsl = info.parsedUrl.protocol === 'https:';
-        info.httpModule = usingSsl ? https : http;
-        const defaultPort = usingSsl ? 443 : 80;
-        info.options = {};
-        info.options.host = info.parsedUrl.hostname;
-        info.options.port = info.parsedUrl.port
-            ? parseInt(info.parsedUrl.port)
-            : defaultPort;
-        info.options.path =
-            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
-        info.options.method = method;
-        info.options.headers = this._mergeHeaders(headers);
-        if (this.userAgent != null) {
-            info.options.headers['user-agent'] = this.userAgent;
-        }
-        info.options.agent = this._getAgent(info.parsedUrl);
-        // gives handlers an opportunity to participate
-        if (this.handlers) {
-            for (const handler of this.handlers) {
-                handler.prepareRequest(info.options);
-            }
-        }
-        return info;
-    }
-    _mergeHeaders(headers) {
-        if (this.requestOptions && this.requestOptions.headers) {
-            return Object.assign({}, lowercaseKeys$2(this.requestOptions.headers), lowercaseKeys$2(headers || {}));
-        }
-        return lowercaseKeys$2(headers || {});
-    }
-    /**
-     * Gets an existing header value or returns a default.
-     * Handles converting number header values to strings since HTTP headers must be strings.
-     * Note: This returns string | string[] since some headers can have multiple values.
-     * For headers that must always be a single string (like Content-Type), use the
-     * specialized _getExistingOrDefaultContentTypeHeader method instead.
-     */
-    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys$2(this.requestOptions.headers)[header];
-            if (headerValue) {
-                clientHeader =
-                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
-            }
-        }
-        const additionalValue = additionalHeaders[header];
-        if (additionalValue !== undefined) {
-            return typeof additionalValue === 'number'
-                ? additionalValue.toString()
-                : additionalValue;
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    /**
-     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
-     * Always returns a single string (not an array) since Content-Type should be a single value.
-     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
-     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
-     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
-     */
-    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys$2(this.requestOptions.headers)[Headers$1.ContentType];
-            if (headerValue) {
-                if (typeof headerValue === 'number') {
-                    clientHeader = String(headerValue);
-                }
-                else if (Array.isArray(headerValue)) {
-                    clientHeader = headerValue.join(', ');
-                }
-                else {
-                    clientHeader = headerValue;
-                }
-            }
-        }
-        const additionalValue = additionalHeaders[Headers$1.ContentType];
-        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
-        if (additionalValue !== undefined) {
-            if (typeof additionalValue === 'number') {
-                return String(additionalValue);
-            }
-            else if (Array.isArray(additionalValue)) {
-                return additionalValue.join(', ');
-            }
-            else {
-                return additionalValue;
-            }
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    _getAgent(parsedUrl) {
-        let agent;
-        const proxyUrl = getProxyUrl$1(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (this._keepAlive && useProxy) {
-            agent = this._proxyAgent;
-        }
-        if (!useProxy) {
-            agent = this._agent;
-        }
-        // if agent is already assigned use that agent.
-        if (agent) {
-            return agent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        let maxSockets = 100;
-        if (this.requestOptions) {
-            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
-        }
-        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
-        if (proxyUrl && proxyUrl.hostname) {
-            const agentOptions = {
-                maxSockets,
-                keepAlive: this._keepAlive,
-                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
-                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
-                })), { host: proxyUrl.hostname, port: proxyUrl.port })
-            };
-            let tunnelAgent;
-            const overHttps = proxyUrl.protocol === 'https:';
-            if (usingSsl) {
-                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
-            }
-            else {
-                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
-            }
-            agent = tunnelAgent(agentOptions);
-            this._proxyAgent = agent;
-        }
-        // if tunneling agent isn't assigned create a new agent
-        if (!agent) {
-            const options = { keepAlive: this._keepAlive, maxSockets };
-            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
-            this._agent = agent;
-        }
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            agent.options = Object.assign(agent.options || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return agent;
-    }
-    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
-        let proxyAgent;
-        if (this._keepAlive) {
-            proxyAgent = this._proxyAgentDispatcher;
-        }
-        // if agent is already assigned use that agent.
-        if (proxyAgent) {
-            return proxyAgent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
-            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
-        })));
-        this._proxyAgentDispatcher = proxyAgent;
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return proxyAgent;
-    }
-    _getUserAgentWithOrchestrationId(userAgent) {
-        const baseUserAgent = userAgent || 'actions/http-client';
-        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
-        if (orchId) {
-            // Sanitize the orchestration ID to ensure it contains only valid characters
-            // Valid characters: 0-9, a-z, _, -, .
-            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
-            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
-        }
-        return baseUserAgent;
-    }
-    _performExponentialBackoff(retryNumber) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            retryNumber = Math.min(ExponentialBackoffCeiling$1, retryNumber);
-            const ms = ExponentialBackoffTimeSlice$1 * Math.pow(2, retryNumber);
-            return new Promise(resolve => setTimeout(() => resolve(), ms));
-        });
-    }
-    _processResponse(res, options) {
-        return __awaiter$f(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => __awaiter$f(this, void 0, void 0, function* () {
-                const statusCode = res.message.statusCode || 0;
-                const response = {
-                    statusCode,
-                    result: null,
-                    headers: {}
-                };
-                // not found leads to null obj returned
-                if (statusCode === HttpCodes$1.NotFound) {
-                    resolve(response);
-                }
-                // get the result from the body
-                function dateTimeDeserializer(key, value) {
-                    if (typeof value === 'string') {
-                        const a = new Date(value);
-                        if (!isNaN(a.valueOf())) {
-                            return a;
-                        }
-                    }
-                    return value;
-                }
-                let obj;
-                let contents;
-                try {
-                    contents = yield res.readBody();
-                    if (contents && contents.length > 0) {
-                        if (options && options.deserializeDates) {
-                            obj = JSON.parse(contents, dateTimeDeserializer);
-                        }
-                        else {
-                            obj = JSON.parse(contents);
-                        }
-                        response.result = obj;
-                    }
-                    response.headers = res.message.headers;
-                }
-                catch (err) {
-                    // Invalid resource (contents not json);  leaving result obj null
-                }
-                // note that 3xx redirects are handled by the http layer.
-                if (statusCode > 299) {
-                    let msg;
-                    // if exception/error in body, attempt to get better error
-                    if (obj && obj.message) {
-                        msg = obj.message;
-                    }
-                    else if (contents && contents.length > 0) {
-                        // it may be the case that the exception is in the body message as string
-                        msg = contents;
-                    }
-                    else {
-                        msg = `Failed request: (${statusCode})`;
-                    }
-                    const err = new HttpClientError$1(msg, statusCode);
-                    err.result = response.result;
-                    reject(err);
-                }
-                else {
-                    resolve(response);
-                }
-            }));
-        });
-    }
-};
-const lowercaseKeys$2 = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
-
-var __awaiter$e = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$c = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -42277,7 +42572,7 @@ class RetryHelper {
         }
     }
     execute(action, isRetryable) {
-        return __awaiter$e(this, void 0, void 0, function* () {
+        return __awaiter$c(this, void 0, void 0, function* () {
             let attempt = 1;
             while (attempt < this.maxAttempts) {
                 // Try
@@ -42305,13 +42600,13 @@ class RetryHelper {
             this.minSeconds);
     }
     sleep(seconds) {
-        return __awaiter$e(this, void 0, void 0, function* () {
+        return __awaiter$c(this, void 0, void 0, function* () {
             return new Promise(resolve => setTimeout(resolve, seconds * 1000));
         });
     }
 }
 
-var __awaiter$d = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$b = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -42329,7 +42624,7 @@ class HTTPError extends Error {
 }
 process.platform === 'win32';
 process.platform === 'darwin';
-const userAgent$1 = 'actions/tool-cache';
+const userAgent$2 = 'actions/tool-cache';
 /**
  * Download a tool from an url and stream it into a file
  *
@@ -42340,16 +42635,16 @@ const userAgent$1 = 'actions/tool-cache';
  * @returns         path to downloaded tool
  */
 function downloadTool(url, dest, auth, headers) {
-    return __awaiter$d(this, void 0, void 0, function* () {
-        dest = dest || path$1.join(_getTempDirectory(), crypto$1.randomUUID());
-        yield mkdirP(path$1.dirname(dest));
+    return __awaiter$b(this, void 0, void 0, function* () {
+        dest = dest || path.join(_getTempDirectory(), crypto.randomUUID());
+        yield mkdirP(path.dirname(dest));
         debug(`Downloading ${url}`);
         debug(`Destination ${dest}`);
         const maxAttempts = 3;
         const minSeconds = _getGlobal('TEST_DOWNLOAD_TOOL_RETRY_MIN_SECONDS', 10);
         const maxSeconds = _getGlobal('TEST_DOWNLOAD_TOOL_RETRY_MAX_SECONDS', 20);
         const retryHelper = new RetryHelper(maxAttempts, minSeconds, maxSeconds);
-        return yield retryHelper.execute(() => __awaiter$d(this, void 0, void 0, function* () {
+        return yield retryHelper.execute(() => __awaiter$b(this, void 0, void 0, function* () {
             return yield downloadToolAttempt(url, dest || '', auth, headers);
         }), (err) => {
             if (err instanceof HTTPError && err.httpStatusCode) {
@@ -42366,12 +42661,12 @@ function downloadTool(url, dest, auth, headers) {
     });
 }
 function downloadToolAttempt(url, dest, auth, headers) {
-    return __awaiter$d(this, void 0, void 0, function* () {
+    return __awaiter$b(this, void 0, void 0, function* () {
         if (fs.existsSync(dest)) {
             throw new Error(`Destination file path ${dest} already exists`);
         }
         // Get the response headers
-        const http = new HttpClient$1(userAgent$1, [], {
+        const http = new HttpClient(userAgent$2, [], {
             allowRetries: false
         });
         if (auth) {
@@ -47111,807 +47406,6 @@ The following characters are not allowed in files that are uploaded due to limit
     }
 }
 
-function getProxyUrl(reqUrl) {
-    const usingSsl = reqUrl.protocol === 'https:';
-    if (checkBypass(reqUrl)) {
-        return undefined;
-    }
-    const proxyVar = (() => {
-        if (usingSsl) {
-            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
-        }
-        else {
-            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
-        }
-    })();
-    if (proxyVar) {
-        try {
-            return new DecodedURL(proxyVar);
-        }
-        catch (_a) {
-            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
-                return new DecodedURL(`http://${proxyVar}`);
-        }
-    }
-    else {
-        return undefined;
-    }
-}
-function checkBypass(reqUrl) {
-    if (!reqUrl.hostname) {
-        return false;
-    }
-    const reqHost = reqUrl.hostname;
-    if (isLoopbackAddress(reqHost)) {
-        return true;
-    }
-    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
-    if (!noProxy) {
-        return false;
-    }
-    // Determine the request port
-    let reqPort;
-    if (reqUrl.port) {
-        reqPort = Number(reqUrl.port);
-    }
-    else if (reqUrl.protocol === 'http:') {
-        reqPort = 80;
-    }
-    else if (reqUrl.protocol === 'https:') {
-        reqPort = 443;
-    }
-    // Format the request hostname and hostname with port
-    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
-    if (typeof reqPort === 'number') {
-        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
-    }
-    // Compare request host against noproxy
-    for (const upperNoProxyItem of noProxy
-        .split(',')
-        .map(x => x.trim().toUpperCase())
-        .filter(x => x)) {
-        if (upperNoProxyItem === '*' ||
-            upperReqHosts.some(x => x === upperNoProxyItem ||
-                x.endsWith(`.${upperNoProxyItem}`) ||
-                (upperNoProxyItem.startsWith('.') &&
-                    x.endsWith(`${upperNoProxyItem}`)))) {
-            return true;
-        }
-    }
-    return false;
-}
-function isLoopbackAddress(host) {
-    const hostLower = host.toLowerCase();
-    return (hostLower === 'localhost' ||
-        hostLower.startsWith('127.') ||
-        hostLower.startsWith('[::1]') ||
-        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
-}
-class DecodedURL extends URL {
-    constructor(url, base) {
-        super(url, base);
-        this._decodedUsername = decodeURIComponent(super.username);
-        this._decodedPassword = decodeURIComponent(super.password);
-    }
-    get username() {
-        return this._decodedUsername;
-    }
-    get password() {
-        return this._decodedPassword;
-    }
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-var __awaiter$c = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var HttpCodes;
-(function (HttpCodes) {
-    HttpCodes[HttpCodes["OK"] = 200] = "OK";
-    HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
-    HttpCodes[HttpCodes["MovedPermanently"] = 301] = "MovedPermanently";
-    HttpCodes[HttpCodes["ResourceMoved"] = 302] = "ResourceMoved";
-    HttpCodes[HttpCodes["SeeOther"] = 303] = "SeeOther";
-    HttpCodes[HttpCodes["NotModified"] = 304] = "NotModified";
-    HttpCodes[HttpCodes["UseProxy"] = 305] = "UseProxy";
-    HttpCodes[HttpCodes["SwitchProxy"] = 306] = "SwitchProxy";
-    HttpCodes[HttpCodes["TemporaryRedirect"] = 307] = "TemporaryRedirect";
-    HttpCodes[HttpCodes["PermanentRedirect"] = 308] = "PermanentRedirect";
-    HttpCodes[HttpCodes["BadRequest"] = 400] = "BadRequest";
-    HttpCodes[HttpCodes["Unauthorized"] = 401] = "Unauthorized";
-    HttpCodes[HttpCodes["PaymentRequired"] = 402] = "PaymentRequired";
-    HttpCodes[HttpCodes["Forbidden"] = 403] = "Forbidden";
-    HttpCodes[HttpCodes["NotFound"] = 404] = "NotFound";
-    HttpCodes[HttpCodes["MethodNotAllowed"] = 405] = "MethodNotAllowed";
-    HttpCodes[HttpCodes["NotAcceptable"] = 406] = "NotAcceptable";
-    HttpCodes[HttpCodes["ProxyAuthenticationRequired"] = 407] = "ProxyAuthenticationRequired";
-    HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
-    HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
-    HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
-    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
-    HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
-    HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
-    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
-    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
-    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes || (HttpCodes = {}));
-var Headers;
-(function (Headers) {
-    Headers["Accept"] = "accept";
-    Headers["ContentType"] = "content-type";
-})(Headers || (Headers = {}));
-var MediaTypes;
-(function (MediaTypes) {
-    MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes || (MediaTypes = {}));
-const HttpRedirectCodes = [
-    HttpCodes.MovedPermanently,
-    HttpCodes.ResourceMoved,
-    HttpCodes.SeeOther,
-    HttpCodes.TemporaryRedirect,
-    HttpCodes.PermanentRedirect
-];
-const HttpResponseRetryCodes = [
-    HttpCodes.BadGateway,
-    HttpCodes.ServiceUnavailable,
-    HttpCodes.GatewayTimeout
-];
-const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
-const ExponentialBackoffCeiling = 10;
-const ExponentialBackoffTimeSlice = 5;
-class HttpClientError extends Error {
-    constructor(message, statusCode) {
-        super(message);
-        this.name = 'HttpClientError';
-        this.statusCode = statusCode;
-        Object.setPrototypeOf(this, HttpClientError.prototype);
-    }
-}
-class HttpClientResponse {
-    constructor(message) {
-        this.message = message;
-    }
-    readBody() {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$c(this, void 0, void 0, function* () {
-                let output = Buffer.alloc(0);
-                this.message.on('data', (chunk) => {
-                    output = Buffer.concat([output, chunk]);
-                });
-                this.message.on('end', () => {
-                    resolve(output.toString());
-                });
-            }));
-        });
-    }
-    readBodyBuffer() {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$c(this, void 0, void 0, function* () {
-                const chunks = [];
-                this.message.on('data', (chunk) => {
-                    chunks.push(chunk);
-                });
-                this.message.on('end', () => {
-                    resolve(Buffer.concat(chunks));
-                });
-            }));
-        });
-    }
-}
-class HttpClient {
-    constructor(userAgent, handlers, requestOptions) {
-        this._ignoreSslError = false;
-        this._allowRedirects = true;
-        this._allowRedirectDowngrade = false;
-        this._maxRedirects = 50;
-        this._allowRetries = false;
-        this._maxRetries = 1;
-        this._keepAlive = false;
-        this._disposed = false;
-        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
-        this.handlers = handlers || [];
-        this.requestOptions = requestOptions;
-        if (requestOptions) {
-            if (requestOptions.ignoreSslError != null) {
-                this._ignoreSslError = requestOptions.ignoreSslError;
-            }
-            this._socketTimeout = requestOptions.socketTimeout;
-            if (requestOptions.allowRedirects != null) {
-                this._allowRedirects = requestOptions.allowRedirects;
-            }
-            if (requestOptions.allowRedirectDowngrade != null) {
-                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
-            }
-            if (requestOptions.maxRedirects != null) {
-                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
-            }
-            if (requestOptions.keepAlive != null) {
-                this._keepAlive = requestOptions.keepAlive;
-            }
-            if (requestOptions.allowRetries != null) {
-                this._allowRetries = requestOptions.allowRetries;
-            }
-            if (requestOptions.maxRetries != null) {
-                this._maxRetries = requestOptions.maxRetries;
-            }
-        }
-    }
-    options(requestUrl, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    get(requestUrl, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('GET', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    del(requestUrl, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    post(requestUrl, data, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('POST', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    patch(requestUrl, data, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    put(requestUrl, data, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('PUT', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    head(requestUrl, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    sendStream(verb, requestUrl, stream, additionalHeaders) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return this.request(verb, requestUrl, stream, additionalHeaders);
-        });
-    }
-    /**
-     * Gets a typed object from an endpoint
-     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
-     */
-    getJson(requestUrl_1) {
-        return __awaiter$c(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            const res = yield this.get(requestUrl, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    postJson(requestUrl_1, obj_1) {
-        return __awaiter$c(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            additionalHeaders[Headers.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
-            const res = yield this.post(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    putJson(requestUrl_1, obj_1) {
-        return __awaiter$c(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            additionalHeaders[Headers.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
-            const res = yield this.put(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    patchJson(requestUrl_1, obj_1) {
-        return __awaiter$c(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-            additionalHeaders[Headers.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
-            const res = yield this.patch(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    /**
-     * Makes a raw http request.
-     * All other methods such as get, post, patch, and request ultimately call this.
-     * Prefer get, del, post and patch
-     */
-    request(verb, requestUrl, data, headers) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            if (this._disposed) {
-                throw new Error('Client has already been disposed.');
-            }
-            const parsedUrl = new URL(requestUrl);
-            let info = this._prepareRequest(verb, parsedUrl, headers);
-            // Only perform retries on reads since writes may not be idempotent.
-            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
-                ? this._maxRetries + 1
-                : 1;
-            let numTries = 0;
-            let response;
-            do {
-                response = yield this.requestRaw(info, data);
-                // Check if it's an authentication challenge
-                if (response &&
-                    response.message &&
-                    response.message.statusCode === HttpCodes.Unauthorized) {
-                    let authenticationHandler;
-                    for (const handler of this.handlers) {
-                        if (handler.canHandleAuthentication(response)) {
-                            authenticationHandler = handler;
-                            break;
-                        }
-                    }
-                    if (authenticationHandler) {
-                        return authenticationHandler.handleAuthentication(this, info, data);
-                    }
-                    else {
-                        // We have received an unauthorized response but have no handlers to handle it.
-                        // Let the response return to the caller.
-                        return response;
-                    }
-                }
-                let redirectsRemaining = this._maxRedirects;
-                while (response.message.statusCode &&
-                    HttpRedirectCodes.includes(response.message.statusCode) &&
-                    this._allowRedirects &&
-                    redirectsRemaining > 0) {
-                    const redirectUrl = response.message.headers['location'];
-                    if (!redirectUrl) {
-                        // if there's no location to redirect to, we won't
-                        break;
-                    }
-                    const parsedRedirectUrl = new URL(redirectUrl);
-                    if (parsedUrl.protocol === 'https:' &&
-                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
-                        !this._allowRedirectDowngrade) {
-                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
-                    }
-                    // we need to finish reading the response before reassigning response
-                    // which will leak the open socket.
-                    yield response.readBody();
-                    // strip authorization header if redirected to a different hostname
-                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
-                        for (const header in headers) {
-                            // header names are case insensitive
-                            if (header.toLowerCase() === 'authorization') {
-                                delete headers[header];
-                            }
-                        }
-                    }
-                    // let's make the request with the new redirectUrl
-                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
-                    response = yield this.requestRaw(info, data);
-                    redirectsRemaining--;
-                }
-                if (!response.message.statusCode ||
-                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
-                    // If not a retry code, return immediately instead of retrying
-                    return response;
-                }
-                numTries += 1;
-                if (numTries < maxTries) {
-                    yield response.readBody();
-                    yield this._performExponentialBackoff(numTries);
-                }
-            } while (numTries < maxTries);
-            return response;
-        });
-    }
-    /**
-     * Needs to be called if keepAlive is set to true in request options.
-     */
-    dispose() {
-        if (this._agent) {
-            this._agent.destroy();
-        }
-        this._disposed = true;
-    }
-    /**
-     * Raw request.
-     * @param info
-     * @param data
-     */
-    requestRaw(info, data) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => {
-                function callbackForResult(err, res) {
-                    if (err) {
-                        reject(err);
-                    }
-                    else if (!res) {
-                        // If `err` is not passed, then `res` must be passed.
-                        reject(new Error('Unknown error'));
-                    }
-                    else {
-                        resolve(res);
-                    }
-                }
-                this.requestRawWithCallback(info, data, callbackForResult);
-            });
-        });
-    }
-    /**
-     * Raw request with callback.
-     * @param info
-     * @param data
-     * @param onResult
-     */
-    requestRawWithCallback(info, data, onResult) {
-        if (typeof data === 'string') {
-            if (!info.options.headers) {
-                info.options.headers = {};
-            }
-            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
-        }
-        let callbackCalled = false;
-        function handleResult(err, res) {
-            if (!callbackCalled) {
-                callbackCalled = true;
-                onResult(err, res);
-            }
-        }
-        const req = info.httpModule.request(info.options, (msg) => {
-            const res = new HttpClientResponse(msg);
-            handleResult(undefined, res);
-        });
-        let socket;
-        req.on('socket', sock => {
-            socket = sock;
-        });
-        // If we ever get disconnected, we want the socket to timeout eventually
-        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
-            if (socket) {
-                socket.end();
-            }
-            handleResult(new Error(`Request timeout: ${info.options.path}`));
-        });
-        req.on('error', function (err) {
-            // err has statusCode property
-            // res should have headers
-            handleResult(err);
-        });
-        if (data && typeof data === 'string') {
-            req.write(data, 'utf8');
-        }
-        if (data && typeof data !== 'string') {
-            data.on('close', function () {
-                req.end();
-            });
-            data.pipe(req);
-        }
-        else {
-            req.end();
-        }
-    }
-    /**
-     * Gets an http agent. This function is useful when you need an http agent that handles
-     * routing through a proxy server - depending upon the url and proxy environment variables.
-     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
-     */
-    getAgent(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        return this._getAgent(parsedUrl);
-    }
-    getAgentDispatcher(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        const proxyUrl = getProxyUrl(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (!useProxy) {
-            return;
-        }
-        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
-    }
-    _prepareRequest(method, requestUrl, headers) {
-        const info = {};
-        info.parsedUrl = requestUrl;
-        const usingSsl = info.parsedUrl.protocol === 'https:';
-        info.httpModule = usingSsl ? https : http;
-        const defaultPort = usingSsl ? 443 : 80;
-        info.options = {};
-        info.options.host = info.parsedUrl.hostname;
-        info.options.port = info.parsedUrl.port
-            ? parseInt(info.parsedUrl.port)
-            : defaultPort;
-        info.options.path =
-            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
-        info.options.method = method;
-        info.options.headers = this._mergeHeaders(headers);
-        if (this.userAgent != null) {
-            info.options.headers['user-agent'] = this.userAgent;
-        }
-        info.options.agent = this._getAgent(info.parsedUrl);
-        // gives handlers an opportunity to participate
-        if (this.handlers) {
-            for (const handler of this.handlers) {
-                handler.prepareRequest(info.options);
-            }
-        }
-        return info;
-    }
-    _mergeHeaders(headers) {
-        if (this.requestOptions && this.requestOptions.headers) {
-            return Object.assign({}, lowercaseKeys$1(this.requestOptions.headers), lowercaseKeys$1(headers || {}));
-        }
-        return lowercaseKeys$1(headers || {});
-    }
-    /**
-     * Gets an existing header value or returns a default.
-     * Handles converting number header values to strings since HTTP headers must be strings.
-     * Note: This returns string | string[] since some headers can have multiple values.
-     * For headers that must always be a single string (like Content-Type), use the
-     * specialized _getExistingOrDefaultContentTypeHeader method instead.
-     */
-    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys$1(this.requestOptions.headers)[header];
-            if (headerValue) {
-                clientHeader =
-                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
-            }
-        }
-        const additionalValue = additionalHeaders[header];
-        if (additionalValue !== undefined) {
-            return typeof additionalValue === 'number'
-                ? additionalValue.toString()
-                : additionalValue;
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    /**
-     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
-     * Always returns a single string (not an array) since Content-Type should be a single value.
-     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
-     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
-     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
-     */
-    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys$1(this.requestOptions.headers)[Headers.ContentType];
-            if (headerValue) {
-                if (typeof headerValue === 'number') {
-                    clientHeader = String(headerValue);
-                }
-                else if (Array.isArray(headerValue)) {
-                    clientHeader = headerValue.join(', ');
-                }
-                else {
-                    clientHeader = headerValue;
-                }
-            }
-        }
-        const additionalValue = additionalHeaders[Headers.ContentType];
-        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
-        if (additionalValue !== undefined) {
-            if (typeof additionalValue === 'number') {
-                return String(additionalValue);
-            }
-            else if (Array.isArray(additionalValue)) {
-                return additionalValue.join(', ');
-            }
-            else {
-                return additionalValue;
-            }
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    _getAgent(parsedUrl) {
-        let agent;
-        const proxyUrl = getProxyUrl(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (this._keepAlive && useProxy) {
-            agent = this._proxyAgent;
-        }
-        if (!useProxy) {
-            agent = this._agent;
-        }
-        // if agent is already assigned use that agent.
-        if (agent) {
-            return agent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        let maxSockets = 100;
-        if (this.requestOptions) {
-            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
-        }
-        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
-        if (proxyUrl && proxyUrl.hostname) {
-            const agentOptions = {
-                maxSockets,
-                keepAlive: this._keepAlive,
-                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
-                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
-                })), { host: proxyUrl.hostname, port: proxyUrl.port })
-            };
-            let tunnelAgent;
-            const overHttps = proxyUrl.protocol === 'https:';
-            if (usingSsl) {
-                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
-            }
-            else {
-                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
-            }
-            agent = tunnelAgent(agentOptions);
-            this._proxyAgent = agent;
-        }
-        // if tunneling agent isn't assigned create a new agent
-        if (!agent) {
-            const options = { keepAlive: this._keepAlive, maxSockets };
-            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
-            this._agent = agent;
-        }
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            agent.options = Object.assign(agent.options || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return agent;
-    }
-    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
-        let proxyAgent;
-        if (this._keepAlive) {
-            proxyAgent = this._proxyAgentDispatcher;
-        }
-        // if agent is already assigned use that agent.
-        if (proxyAgent) {
-            return proxyAgent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
-            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
-        })));
-        this._proxyAgentDispatcher = proxyAgent;
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return proxyAgent;
-    }
-    _getUserAgentWithOrchestrationId(userAgent) {
-        const baseUserAgent = userAgent || 'actions/http-client';
-        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
-        if (orchId) {
-            // Sanitize the orchestration ID to ensure it contains only valid characters
-            // Valid characters: 0-9, a-z, _, -, .
-            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
-            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
-        }
-        return baseUserAgent;
-    }
-    _performExponentialBackoff(retryNumber) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
-            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-            return new Promise(resolve => setTimeout(() => resolve(), ms));
-        });
-    }
-    _processResponse(res, options) {
-        return __awaiter$c(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => __awaiter$c(this, void 0, void 0, function* () {
-                const statusCode = res.message.statusCode || 0;
-                const response = {
-                    statusCode,
-                    result: null,
-                    headers: {}
-                };
-                // not found leads to null obj returned
-                if (statusCode === HttpCodes.NotFound) {
-                    resolve(response);
-                }
-                // get the result from the body
-                function dateTimeDeserializer(key, value) {
-                    if (typeof value === 'string') {
-                        const a = new Date(value);
-                        if (!isNaN(a.valueOf())) {
-                            return a;
-                        }
-                    }
-                    return value;
-                }
-                let obj;
-                let contents;
-                try {
-                    contents = yield res.readBody();
-                    if (contents && contents.length > 0) {
-                        if (options && options.deserializeDates) {
-                            obj = JSON.parse(contents, dateTimeDeserializer);
-                        }
-                        else {
-                            obj = JSON.parse(contents);
-                        }
-                        response.result = obj;
-                    }
-                    response.headers = res.message.headers;
-                }
-                catch (err) {
-                    // Invalid resource (contents not json);  leaving result obj null
-                }
-                // note that 3xx redirects are handled by the http layer.
-                if (statusCode > 299) {
-                    let msg;
-                    // if exception/error in body, attempt to get better error
-                    if (obj && obj.message) {
-                        msg = obj.message;
-                    }
-                    else if (contents && contents.length > 0) {
-                        // it may be the case that the exception is in the body message as string
-                        msg = contents;
-                    }
-                    else {
-                        msg = `Failed request: (${statusCode})`;
-                    }
-                    const err = new HttpClientError(msg, statusCode);
-                    err.result = response.result;
-                    reject(err);
-                }
-                else {
-                    resolve(response);
-                }
-            }));
-        });
-    }
-}
-const lowercaseKeys$1 = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
-
-var __awaiter$b = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-class BearerCredentialHandler {
-    constructor(token) {
-        this.token = token;
-    }
-    // currently implements pre-authorization
-    // TODO: support preAuth = false where it hooks on 401
-    prepareRequest(options) {
-        if (!options.headers) {
-            throw Error('The request has no headers');
-        }
-        options.headers['Authorization'] = `Bearer ${this.token}`;
-    }
-    // This handler cannot handle 401
-    canHandleAuthentication() {
-        return false;
-    }
-    handleAuthentication() {
-        return __awaiter$b(this, void 0, void 0, function* () {
-            throw new Error('not implemented');
-        });
-    }
-}
-
 var version$2 = "6.2.1";
 var require$$0$2 = {
 	version: version$2};
@@ -48853,7 +48347,7 @@ function createHttpHeaders$1(rawHeaders) {
  * @returns RFC4122 v4 UUID.
  */
 function randomUUID$1() {
-    return crypto.randomUUID();
+    return globalThis.crypto.randomUUID();
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -49573,9 +49067,6 @@ class NodeHttpClient {
                 body = uploadReportStream;
             }
             const res = await this.makeRequest(request, abortController, body);
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
-            }
             const headers = getResponseHeaders(res);
             const status = res.statusCode ?? 0;
             const response = {
@@ -49613,6 +49104,9 @@ class NodeHttpClient {
             return response;
         }
         finally {
+            if (timeoutId !== undefined) {
+                clearTimeout(timeoutId);
+            }
             // clean up event listener
             if (request.abortSignal && abortListener) {
                 let uploadStreamDone = Promise.resolve();
@@ -49653,7 +49147,7 @@ class NodeHttpClient {
             ...request.requestOverrides,
         };
         return new Promise((resolve, reject) => {
-            const req = isInsecure ? http$1.request(options, resolve) : https$1.request(options, resolve);
+            const req = isInsecure ? http$1.request(options, resolve) : https.request(options, resolve);
             req.once("error", (err) => {
                 reject(new RestError$1(err.message, { code: err.code ?? RestError$1.REQUEST_SEND_ERROR, request }));
             });
@@ -49703,7 +49197,7 @@ class NodeHttpClient {
             if (disableKeepAlive && !request.tlsSettings) {
                 // When there are no tlsSettings and keepAlive is false
                 // we don't need a custom agent
-                return https$1.globalAgent;
+                return https.globalAgent;
             }
             // We use the tlsSettings to index cached clients
             const tlsSettings = request.tlsSettings ?? DEFAULT_TLS_SETTINGS;
@@ -49714,7 +49208,7 @@ class NodeHttpClient {
                 return agent;
             }
             logger$4.info("No cached TLS Agent exist, creating a new Agent");
-            agent = new https$1.Agent({
+            agent = new https.Agent({
                 // keepAlive is true if disableKeepAlive is false.
                 keepAlive: !disableKeepAlive,
                 // Since we are spreading, if no tslSettings were provided, nothing is added to the agent options.
@@ -49843,7 +49337,7 @@ function logPolicy$1(options = {}) {
             logger(`Request: ${sanitizer.sanitize(request)}`);
             const response = await next(request);
             logger(`Response status code: ${response.status}`);
-            logger(`Headers: ${sanitizer.sanitize(response.headers)}`);
+            logger(`Headers: ${sanitizer.sanitize({ headers: response.headers })}`);
             return response;
         },
     };
@@ -50104,7 +49598,6 @@ function retryPolicy(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_CO
             let retryCount = -1;
             retryRequest: while (true) {
                 retryCount += 1;
-                response = undefined;
                 responseError = undefined;
                 try {
                     logger.info(`Retry ${retryCount}: Attempting to send request`, request.requestId);
@@ -51145,7 +50638,7 @@ function requireSupportsColor () {
 	if (hasRequiredSupportsColor) return supportsColor_1;
 	hasRequiredSupportsColor = 1;
 	const os = os__default;
-	const tty = require$$1$2;
+	const tty = require$$1$3;
 	const hasFlag = requireHasFlag();
 
 	const {env} = process;
@@ -51291,7 +50784,7 @@ function requireNode$1 () {
 	if (hasRequiredNode$1) return node$1.exports;
 	hasRequiredNode$1 = 1;
 	(function (module, exports) {
-		const tty = require$$1$2;
+		const tty = require$$1$3;
 		const util = require$$0__default;
 
 		/**
@@ -51607,7 +51100,7 @@ function requireHelpers () {
 	Object.defineProperty(helpers, "__esModule", { value: true });
 	helpers.req = helpers.json = helpers.toBuffer = void 0;
 	const http = __importStar(http__default);
-	const https = __importStar(https__default);
+	const https = __importStar(require$$1__default);
 	async function toBuffer(stream) {
 	    let length = 0;
 	    const chunks = [];
@@ -51685,7 +51178,7 @@ function requireDist$4 () {
 		exports.Agent = void 0;
 		const net = __importStar(require$$0$4);
 		const http = __importStar(http__default);
-		const https_1 = https__default;
+		const https_1 = require$$1__default;
 		__exportStar(requireHelpers(), exports);
 		const INTERNAL = Symbol('AgentBaseInternalState');
 		class Agent extends http.Agent {
@@ -51980,7 +51473,7 @@ function requireDist$3 () {
 	Object.defineProperty(dist$4, "__esModule", { value: true });
 	dist$4.HttpsProxyAgent = void 0;
 	const net = __importStar(require$$0$4);
-	const tls = __importStar(require$$1$1);
+	const tls = __importStar(require$$1$2);
 	const assert_1 = __importDefault(require$$5);
 	const debug_1 = __importDefault(requireSrc$1());
 	const agent_base_1 = requireDist$4();
@@ -52171,9 +51664,9 @@ function requireDist$2 () {
 	Object.defineProperty(dist$2, "__esModule", { value: true });
 	dist$2.HttpProxyAgent = void 0;
 	const net = __importStar(require$$0$4);
-	const tls = __importStar(require$$1$1);
+	const tls = __importStar(require$$1$2);
 	const debug_1 = __importDefault(requireSrc$1());
-	const events_1 = require$$1;
+	const events_1 = require$$1$1;
 	const agent_base_1 = requireDist$4();
 	const url_1 = require$$5$1;
 	const debug = (0, debug_1.default)('http-proxy-agent');
@@ -52833,7 +52326,7 @@ async function setPlatformSpecificData(map) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const SDK_VERSION$1 = "1.24.0";
+const SDK_VERSION$1 = "1.25.0";
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -52989,20 +52482,30 @@ function formDataPolicy() {
 }
 
 // Copyright (c) Microsoft Corporation.
-// Licensed under the MIT license.
+// Licensed under the MIT License.
 /**
  * This error is thrown when an asynchronous operation has been aborted.
  * Check for this error by testing the `name` that the name property of the
  * error matches `"AbortError"`.
  *
  * @example
- * ```ts
+ * ```ts snippet:AbortErrorSample
+ * import { AbortError } from "@azure/abort-controller";
+ *
+ * async function doAsyncWork(options: { abortSignal: AbortSignal }): Promise<void> {
+ *   if (options.abortSignal.aborted) {
+ *     throw new AbortError();
+ *   }
+ *
+ *   // do async work
+ * }
+ *
  * const controller = new AbortController();
  * controller.abort();
  * try {
- *   doAsyncWork(controller.signal)
+ *   doAsyncWork({ abortSignal: controller.signal });
  * } catch (e) {
- *   if (e.name === 'AbortError') {
+ *   if (e instanceof Error && e.name === "AbortError") {
  *     // handle abort error here.
  *   }
  * }
@@ -53256,30 +52759,30 @@ class TracingContextImpl {
     }
 }
 
-var state$3 = {};
+var stateCjs$1 = {};
 
-var hasRequiredState$2;
+var hasRequiredStateCjs$1;
 
-function requireState$2 () {
-	if (hasRequiredState$2) return state$3;
-	hasRequiredState$2 = 1;
+function requireStateCjs$1 () {
+	if (hasRequiredStateCjs$1) return stateCjs$1;
+	hasRequiredStateCjs$1 = 1;
 	// Copyright (c) Microsoft Corporation.
 	// Licensed under the MIT License.
-	Object.defineProperty(state$3, "__esModule", { value: true });
-	state$3.state = void 0;
+	Object.defineProperty(stateCjs$1, "__esModule", { value: true });
+	stateCjs$1.state = void 0;
 	/**
 	 * @internal
 	 *
 	 * Holds the singleton instrumenter, to be shared across CJS and ESM imports.
 	 */
-	state$3.state = {
+	stateCjs$1.state = {
 	    instrumenterImplementation: undefined,
 	};
 	
-	return state$3;
+	return stateCjs$1;
 }
 
-var stateExports = requireState$2();
+var stateCjsExports$1 = requireStateCjs$1();
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -53288,7 +52791,7 @@ var stateExports = requireState$2();
 /**
  * Defines the shared state between CJS and ESM by re-exporting the CJS state.
  */
-const state$2 = stateExports.state;
+const state$2 = stateCjsExports$1.state;
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -53356,8 +52859,8 @@ function createTracingClient(options) {
     function startSpan(name, operationOptions, spanOptions) {
         const startSpanResult = getInstrumenter().startSpan(name, {
             ...spanOptions,
-            packageName: packageName,
-            packageVersion: packageVersion,
+            packageName,
+            packageVersion,
             tracingContext: operationOptions?.tracingOptions?.tracingContext,
         });
         let tracingContext = startSpanResult.tracingContext;
@@ -53377,7 +52880,7 @@ function createTracingClient(options) {
     async function withSpan(name, operationOptions, callback, spanOptions) {
         const { span, updatedOptions } = startSpan(name, operationOptions, spanOptions);
         try {
-            const result = await withContext(updatedOptions.tracingOptions.tracingContext, () => Promise.resolve(callback(updatedOptions, span)));
+            const result = await withContext(updatedOptions.tracingOptions.tracingContext, () => callback(updatedOptions, span));
             span.setStatus({ status: "success" });
             return result;
         }
@@ -54107,11 +53610,6 @@ function getCaeChallengeClaims(challenges) {
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
- * @internal
- * @param accessToken - Access token
- * @returns Whether a token is bearer type or not
- */
-/**
  * Tests an object to determine whether it implements TokenCredential.
  *
  * @param credential - The assumed TokenCredential to be tested.
@@ -54134,7 +53632,7 @@ const disableKeepAlivePolicyName = "DisableKeepAlivePolicy";
 function createDisableKeepAlivePolicy() {
     return {
         name: disableKeepAlivePolicyName,
-        async sendRequest(request, next) {
+        sendRequest(request, next) {
             request.disableKeepAlive = true;
             return next(request);
         },
@@ -55436,7 +54934,7 @@ function shouldDeserializeResponse(parsedResponse) {
     return result;
 }
 async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
-    const parsedResponse = await parse$1(jsonContentTypes, xmlContentTypes, response, options, parseXML);
+    const parsedResponse = await parse$2(jsonContentTypes, xmlContentTypes, response, options, parseXML);
     if (!shouldDeserializeResponse(parsedResponse)) {
         return parsedResponse;
     }
@@ -55561,7 +55059,7 @@ function handleErrorResponse(parsedResponse, operationSpec, responseSpec, option
     }
     return { error, shouldReturnResponse: false };
 }
-async function parse$1(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
+async function parse$2(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
     if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) &&
         operationResponse.bodyAsText) {
         const text = operationResponse.bodyAsText;
@@ -55743,7 +55241,7 @@ function serializeRequestBody(request, operationArguments, operationSpec, string
             }
         }
         catch (error) {
-            throw new Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, undefined, "  ")}.`);
+            throw new Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, undefined, "  ")}.`, { cause: error });
         }
     }
     else if (operationSpec.formDataParameters && operationSpec.formDataParameters.length > 0) {
@@ -56341,6 +55839,22 @@ const originalRequestSymbol = Symbol("Original PipelineRequest");
 // cloned but we need to retrieve the OperationSpec and OperationArguments from the
 // original request.
 const originalClientRequestSymbol = Symbol.for("@azure/core-client original request");
+const passThroughProps = new Set([
+    "url",
+    "method",
+    "withCredentials",
+    "timeout",
+    "requestId",
+    "abortSignal",
+    "body",
+    "formData",
+    "onDownloadProgress",
+    "onUploadProgress",
+    "proxySettings",
+    "streamResponseStatusCodes",
+    "agent",
+    "requestOverrides",
+]);
 function toPipelineRequest(webResource, options = {}) {
     const compatWebResource = webResource;
     const request = compatWebResource[originalRequestSymbol];
@@ -56424,23 +55938,7 @@ function toWebResourceLike(request, options) {
                 if (prop === "keepAlive") {
                     request.disableKeepAlive = !value;
                 }
-                const passThroughProps = [
-                    "url",
-                    "method",
-                    "withCredentials",
-                    "timeout",
-                    "requestId",
-                    "abortSignal",
-                    "body",
-                    "formData",
-                    "onDownloadProgress",
-                    "onUploadProgress",
-                    "proxySettings",
-                    "streamResponseStatusCodes",
-                    "agent",
-                    "requestOverrides",
-                ];
-                if (typeof prop === "string" && passThroughProps.includes(prop)) {
+                if (typeof prop === "string" && passThroughProps.has(prop)) {
                     request[prop] = value;
                 }
                 return Reflect.set(target, prop, value, receiver);
@@ -58919,7 +58417,11 @@ function resolveEnotation(str, trimmedStr, options) {
  */
 function trimZeros(numStr) {
     if (numStr && numStr.indexOf(".") !== -1) {//float
-        numStr = numStr.replace(/0+$/, ""); //remove ending zeros
+        //remove ending zeros without the O(n^2) backtracking that /0+$/ hits
+        //when the string doesn't end in 0 but has a long internal zero-run
+        let end = numStr.length;
+        while (end > 0 && numStr.charCodeAt(end - 1) === 48 /* '0' */) end--;
+        numStr = numStr.slice(0, end);
         if (numStr === ".") numStr = "0";
         else if (numStr[0] === ".") numStr = "0" + numStr;
         else if (numStr[numStr.length - 1] === ".") numStr = numStr.substring(0, numStr.length - 1);
@@ -62085,7 +61587,8 @@ async function parseXML(str, opts = {}) {
         delete parsedXml["?xml"];
     }
     if (!opts.includeRoot) {
-        for (const key of Object.keys(parsedXml)) {
+        const key = Object.keys(parsedXml)[0];
+        if (key !== undefined) {
             const value = parsedXml[key];
             return typeof value === "object" ? { ...value } : value;
         }
@@ -62568,23 +62071,8 @@ class BufferScheduler {
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-const __isNode__ =
-  typeof process === "object" &&
-  typeof process.versions === "object" &&
-  typeof process.versions.node === "string";
-let require$3;
-let __filename$1;
-let __dirname$1;
-if (__isNode__) {
-  require$3 = createRequire(import.meta.url);
-  __filename$1 = fileURLToPath(import.meta.url);
-  __dirname$1 = dirname(__filename$1);
-}
-// ESM-COMPAT-END
-
 var NativeCRC64 = (() => {
-  var _scriptDir = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
-  if (typeof __filename$1 !== 'undefined') _scriptDir = _scriptDir || __filename$1;
+  typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
   return (
 function(NativeCRC64) {
   NativeCRC64 = NativeCRC64 || {};
@@ -62662,24 +62150,10 @@ function locateFile(path) {
 
 if (ENVIRONMENT_IS_NODE) {
   if (typeof process == 'undefined' || !process.release || process.release.name !== 'node') throw new Error('not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)');
-// NODE-READ-START (this block is replaced with a no-op in dist/browser and dist/react-native by copyJSFiles.cjs)
-  // `require()` is no-op in an ESM module, use `createRequire()` to construct
-  // the require()` function.  This is only necessary for multi-environment
-  // builds, `-sENVIRONMENT=node` emits a static import declaration instead.
-  // TODO: Swap all `require()`'s with `import()`'s?
-  // These modules will usually be used on Node.js. Load them eagerly to avoid
-  // the complexity of lazy-loading.
-  require$3('fs');
-  var nodePath = require$3('path');
-
-  if (ENVIRONMENT_IS_WORKER) {
-    scriptDirectory = nodePath.dirname(scriptDirectory) + '/';
-  } else {
-    scriptDirectory = __dirname$1 + '/';
-  }
-
-// end include: node_shell_read.js
-// NODE-READ-END
+  // The wasm is base64-embedded (see `binaryInString`) and loaded via `getBinary()`,
+  // so the Node fs/path read hooks emitted by Emscripten are never exercised and
+  // have been removed. This keeps the file free of Node built-in imports so it can be
+  // consumed as-is by web bundlers and by ESM-to-CommonJS bundlers (see issue #39057).
   if (process['argv'].length > 1) {
     process['argv'][1].replace(/\\/g, '/');
   }
@@ -62707,7 +62181,7 @@ if (ENVIRONMENT_IS_NODE) {
 } else
 if (ENVIRONMENT_IS_SHELL) {
 
-  if ((typeof process == 'object' && typeof require$3 === 'function') || typeof window == 'object' || typeof importScripts == 'function') throw new Error('not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)');
+  if ((typeof process == 'object' && typeof require === 'function') || typeof window == 'object' || typeof importScripts == 'function') throw new Error('not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)');
 
   if (typeof scriptArgs != 'undefined') {
     scriptArgs;
@@ -62726,29 +62200,9 @@ if (ENVIRONMENT_IS_SHELL) {
 // Node.js workers are detected as a combination of ENVIRONMENT_IS_WORKER and
 // ENVIRONMENT_IS_NODE.
 if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
-  if (ENVIRONMENT_IS_WORKER) { // Check worker, not web, since window could be polyfilled
-    scriptDirectory = self.location.href;
-  } else if (typeof document != 'undefined' && document.currentScript) { // web
-    scriptDirectory = document.currentScript.src;
-  }
-  // When MODULARIZE, this JS may be executed later, after document.currentScript
-  // is gone, so we saved it, and we use it here instead of any other info.
-  if (_scriptDir) {
-    scriptDirectory = _scriptDir;
-  }
-  // blob urls look like blob:http://site.com/etc/etc and we cannot infer anything from them.
-  // otherwise, slice off the final part of the url to find the script directory.
-  // if scriptDirectory does not contain a slash, lastIndexOf will return -1,
-  // and scriptDirectory will correctly be replaced with an empty string.
-  // If scriptDirectory contains a query (starting with ?) or a fragment (starting with #),
-  // they are removed because they could contain a slash.
-  if (scriptDirectory.indexOf('blob:') !== 0) {
-    scriptDirectory = scriptDirectory.substr(0, scriptDirectory.replace(/[?#].*/, "").lastIndexOf('/')+1);
-  } else {
-    scriptDirectory = '';
-  }
-
   if (!(typeof window == 'object' || typeof importScripts == 'function')) throw new Error('not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)');
+  // The XHR-based read hooks emitted by Emscripten are unused because the wasm is
+  // base64-embedded; they have been removed so the file contains no DOM/XHR I/O.
 } else
 {
   throw new Error('environment detection error');
@@ -66267,8 +65721,7 @@ class StorageRetryPolicy extends BaseRequestPolicy {
      */
     shouldRetry(isPrimaryRetry, attempt, response, err) {
         if (attempt >= this.retryOptions.maxTries) {
-            logger.info(`RetryPolicy: Attempt(s) ${attempt} >= maxTries ${this.retryOptions
-                .maxTries}, no further try.`);
+            logger.info(`RetryPolicy: Attempt(s) ${attempt} >= maxTries ${this.retryOptions.maxTries}, no further try.`);
             return false;
         }
         // Handle network failures, you may need to customize the list when you implement
@@ -66728,6 +66181,18 @@ function storageRequestFailureDetailsParserPolicy() {
         async sendRequest(request, next) {
             try {
                 const response = await next(request);
+                if (response.status === 400 &&
+                    response.bodyAsText?.includes("<Error><Code>InvalidHeaderValue</Code>") &&
+                    response.bodyAsText.includes("<HeaderName>x-ms-version</HeaderName>")) {
+                    // replace the error message with a more user-friendly one that includes a link to documentation
+                    /* example response text:
+                    `<?xml version="1.0" encoding="utf-8"?>
+          <Error><Code>InvalidHeaderValue</Code><Message>The value for one of the HTTP headers is not in the correct format.
+          RequestId:e5ea566c-101e-001c-1ec4-acf180000000
+          Time:2026-03-05T17:24:34.6688015Z</Message><HeaderName>x-ms-version</HeaderName><HeaderValue>3025-01-01</HeaderValue></Error>`
+                    */
+                    response.bodyAsText = response.bodyAsText.replace(/<Message>.*<\/Message>/s, "<Message>The provided service version is not enabled on this storage account. Please see https://learn.microsoft.com/rest/api/storageservices/versioning-for-the-azure-storage-services for additional information.</Message>");
+                }
                 return response;
             }
             catch (err) {
@@ -89083,7 +88548,7 @@ function uploadToBlobStorage(authenticatedUploadURL, uploadStream, contentType) 
         };
         let sha256Hash = undefined;
         const blobUploadStream = new stream$2.PassThrough();
-        const hashStream = crypto$1.createHash('sha256');
+        const hashStream = crypto.createHash('sha256');
         uploadStream.pipe(blobUploadStream); // This stream is used for the upload
         uploadStream.pipe(hashStream).setEncoding('hex'); // This stream is used to compute a hash of the content for integrity check
         info('Beginning upload of artifact content to blob storage');
@@ -89116,28 +88581,17 @@ function uploadToBlobStorage(authenticatedUploadURL, uploadStream, contentType) 
     });
 }
 
-var path;
-var hasRequiredPath;
-
-function requirePath () {
-	if (hasRequiredPath) return path;
-	hasRequiredPath = 1;
-	const isWindows = typeof process === 'object' &&
-	  process &&
-	  process.platform === 'win32';
-	path = isWindows ? { sep: '\\' } : { sep: '/' };
-	return path;
-}
+var commonjs$2 = {};
 
 var commonjs$1 = {};
 
 var commonjs = {};
 
-var hasRequiredCommonjs$1;
+var hasRequiredCommonjs$2;
 
-function requireCommonjs$1 () {
-	if (hasRequiredCommonjs$1) return commonjs;
-	hasRequiredCommonjs$1 = 1;
+function requireCommonjs$2 () {
+	if (hasRequiredCommonjs$2) return commonjs;
+	hasRequiredCommonjs$2 = 1;
 	(function (exports) {
 		Object.defineProperty(exports, "__esModule", { value: true });
 		exports.range = exports.balanced = void 0;
@@ -89201,16 +88655,16 @@ function requireCommonjs$1 () {
 	return commonjs;
 }
 
-var hasRequiredCommonjs;
+var hasRequiredCommonjs$1;
 
-function requireCommonjs () {
-	if (hasRequiredCommonjs) return commonjs$1;
-	hasRequiredCommonjs = 1;
+function requireCommonjs$1 () {
+	if (hasRequiredCommonjs$1) return commonjs$1;
+	hasRequiredCommonjs$1 = 1;
 	(function (exports) {
 		Object.defineProperty(exports, "__esModule", { value: true });
 		exports.EXPANSION_MAX_LENGTH = exports.EXPANSION_MAX = void 0;
 		exports.expand = expand;
-		const balanced_match_1 = requireCommonjs$1();
+		const balanced_match_1 = requireCommonjs$2();
 		const escSlash = '\0SLASH' + Math.random() + '\0';
 		const escOpen = '\0OPEN' + Math.random() + '\0';
 		const escClose = '\0CLOSE' + Math.random() + '\0';
@@ -89337,7 +88791,7 @@ function requireCommonjs () {
 		}
 		// The expansion values of a single numeric (`1..5`) or alphabetic (`a..e..2`)
 		// sequence body.
-		function expandSequence(body, isAlphaSequence, max) {
+		function expandSequence(body, isAlphaSequence, max, maxLength) {
 		    const n = body.split(/\.\./);
 		    const N = [];
 		    // A sequence body always splits into two or three parts, but the compiler
@@ -89360,6 +88814,7 @@ function requireCommonjs () {
 		        test = gte;
 		    }
 		    const pad = n.some(isPadded);
+		    let length = 0;
 		    for (let i = x; test(i, y) && N.length < max; i += incr) {
 		        let c;
 		        if (isAlphaSequence) {
@@ -89383,7 +88838,10 @@ function requireCommonjs () {
 		                }
 		            }
 		        }
+		        if (length + c.length > maxLength)
+		            break;
 		        N.push(c);
+		        length += c.length;
 		    }
 		    return N;
 		}
@@ -89437,7 +88895,7 @@ function requireCommonjs () {
 		        }
 		        let values;
 		        if (isSequence) {
-		            values = expandSequence(m.body, isAlphaSequence, max);
+		            values = expandSequence(m.body, isAlphaSequence, max, maxLength);
 		        }
 		        else {
 		            let n = parseCommaParts(m.body);
@@ -89455,9 +88913,31 @@ function requireCommonjs () {
 		                }
 		                /* c8 ignore stop */
 		            }
+		            // Values that `combine` is going to drop as empty produce no result, so
+		            // they must not count against `max` - otherwise `{a,,b}` with `max: 2`
+		            // would stop at `['a', '']` and yield one result instead of two. Skipping
+		            // them outright keeps `values` bounded while leaving `max` a bound on
+		            // *kept* results.
+		            let dropsEmpties = dropEmpties && !m.post.length && !pre;
+		            for (let d = 0; dropsEmpties && d < acc.length; d++) {
+		                if (acc[d]) {
+		                    dropsEmpties = false;
+		                }
+		            }
 		            values = [];
-		            for (let j = 0; j < n.length; j++) {
-		                values.push.apply(values, expand_(n[j], max, maxLength, false));
+		            let valuesLength = 0;
+		            outer: for (let j = 0; j < n.length; j++) {
+		                const expanded = expand_(n[j], max, maxLength, false);
+		                for (let k = 0; k < expanded.length; k++) {
+		                    const v = expanded[k];
+		                    if (dropsEmpties && !v)
+		                        continue;
+		                    if (values.length >= max || valuesLength + v.length > maxLength) {
+		                        break outer;
+		                    }
+		                    values.push(v);
+		                    valuesLength += v.length;
+		                }
 		            }
 		        }
 		        acc = combine(acc, pre, values, max, maxLength, dropEmpties && !m.post.length);
@@ -89472,1009 +88952,2262 @@ function requireCommonjs () {
 	return commonjs$1;
 }
 
-var minimatch_1;
-var hasRequiredMinimatch;
+var assertValidPattern = {};
 
-function requireMinimatch () {
-	if (hasRequiredMinimatch) return minimatch_1;
-	hasRequiredMinimatch = 1;
-	const minimatch = minimatch_1 = (p, pattern, options = {}) => {
-	  assertValidPattern(pattern);
+var hasRequiredAssertValidPattern;
 
-	  // shortcut: comments match nothing.
-	  if (!options.nocomment && pattern.charAt(0) === '#') {
-	    return false
-	  }
-
-	  return new Minimatch(pattern, options).match(p)
+function requireAssertValidPattern () {
+	if (hasRequiredAssertValidPattern) return assertValidPattern;
+	hasRequiredAssertValidPattern = 1;
+	Object.defineProperty(assertValidPattern, "__esModule", { value: true });
+	assertValidPattern.assertValidPattern = void 0;
+	const MAX_PATTERN_LENGTH = 1024 * 64;
+	const assertValidPattern$1 = (pattern) => {
+	    if (typeof pattern !== 'string') {
+	        throw new TypeError('invalid pattern');
+	    }
+	    if (pattern.length > MAX_PATTERN_LENGTH) {
+	        throw new TypeError('pattern is too long');
+	    }
 	};
+	assertValidPattern.assertValidPattern = assertValidPattern$1;
+	
+	return assertValidPattern;
+}
 
-	minimatch_1 = minimatch;
+var ast = {};
 
-	const path = requirePath();
-	minimatch.sep = path.sep;
+var braceExpressions = {};
 
-	const GLOBSTAR = Symbol('globstar **');
-	minimatch.GLOBSTAR = GLOBSTAR;
-	const expand = requireCommonjs();
+var hasRequiredBraceExpressions;
 
-	const plTypes = {
-	  '!': { open: '(?:(?!(?:', close: '))[^/]*?)'},
-	  '?': { open: '(?:', close: ')?' },
-	  '+': { open: '(?:', close: ')+' },
-	  '*': { open: '(?:', close: ')*' },
-	  '@': { open: '(?:', close: ')' }
+function requireBraceExpressions () {
+	if (hasRequiredBraceExpressions) return braceExpressions;
+	hasRequiredBraceExpressions = 1;
+	// translate the various posix character classes into unicode properties
+	// this works across all unicode locales
+	Object.defineProperty(braceExpressions, "__esModule", { value: true });
+	braceExpressions.parseClass = void 0;
+	// { <posix class>: [<translation>, /u flag required, negated]
+	const posixClasses = {
+	    '[:alnum:]': ['\\p{L}\\p{Nl}\\p{Nd}', true],
+	    '[:alpha:]': ['\\p{L}\\p{Nl}', true],
+	    '[:ascii:]': ['\\x' + '00-\\x' + '7f', false],
+	    '[:blank:]': ['\\p{Zs}\\t', true],
+	    '[:cntrl:]': ['\\p{Cc}', true],
+	    '[:digit:]': ['\\p{Nd}', true],
+	    '[:graph:]': ['\\p{Z}\\p{C}', true, true],
+	    '[:lower:]': ['\\p{Ll}', true],
+	    '[:print:]': ['\\p{C}', true],
+	    '[:punct:]': ['\\p{P}', true],
+	    '[:space:]': ['\\p{Z}\\t\\r\\n\\v\\f', true],
+	    '[:upper:]': ['\\p{Lu}', true],
+	    '[:word:]': ['\\p{L}\\p{Nl}\\p{Nd}\\p{Pc}', true],
+	    '[:xdigit:]': ['A-Fa-f0-9', false],
 	};
+	// only need to escape a few things inside of brace expressions
+	// escapes: [ \ ] -
+	const braceEscape = (s) => s.replace(/[[\]\\-]/g, '\\$&');
+	// escape all regexp magic characters
+	const regexpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+	// everything has already been escaped, we just have to join
+	const rangesToString = (ranges) => ranges.join('');
+	// takes a glob string at a posix brace expression, and returns
+	// an equivalent regular expression source, and boolean indicating
+	// whether the /u flag needs to be applied, and the number of chars
+	// consumed to parse the character class.
+	// This also removes out of order ranges, and returns ($.) if the
+	// entire class just no good.
+	const parseClass = (glob, position) => {
+	    const pos = position;
+	    /* c8 ignore start */
+	    if (glob.charAt(pos) !== '[') {
+	        throw new Error('not in a brace expression');
+	    }
+	    /* c8 ignore stop */
+	    const ranges = [];
+	    const negs = [];
+	    let i = pos + 1;
+	    let sawStart = false;
+	    let uflag = false;
+	    let escaping = false;
+	    let negate = false;
+	    let endPos = pos;
+	    let rangeStart = '';
+	    WHILE: while (i < glob.length) {
+	        const c = glob.charAt(i);
+	        if ((c === '!' || c === '^') && i === pos + 1) {
+	            negate = true;
+	            i++;
+	            continue;
+	        }
+	        if (c === ']' && sawStart && !escaping) {
+	            endPos = i + 1;
+	            break;
+	        }
+	        sawStart = true;
+	        if (c === '\\') {
+	            if (!escaping) {
+	                escaping = true;
+	                i++;
+	                continue;
+	            }
+	            // escaped \ char, fall through and treat like normal char
+	        }
+	        if (c === '[' && !escaping) {
+	            // either a posix class, a collation equivalent, or just a [
+	            for (const [cls, [unip, u, neg]] of Object.entries(posixClasses)) {
+	                if (glob.startsWith(cls, i)) {
+	                    // invalid, [a-[] is fine, but not [a-[:alpha]]
+	                    if (rangeStart) {
+	                        return ['$.', false, glob.length - pos, true];
+	                    }
+	                    i += cls.length;
+	                    if (neg)
+	                        negs.push(unip);
+	                    else
+	                        ranges.push(unip);
+	                    uflag = uflag || u;
+	                    continue WHILE;
+	                }
+	            }
+	        }
+	        // now it's just a normal character, effectively
+	        escaping = false;
+	        if (rangeStart) {
+	            // throw this range away if it's not valid, but others
+	            // can still match.
+	            if (c > rangeStart) {
+	                ranges.push(braceEscape(rangeStart) + '-' + braceEscape(c));
+	            }
+	            else if (c === rangeStart) {
+	                ranges.push(braceEscape(c));
+	            }
+	            rangeStart = '';
+	            i++;
+	            continue;
+	        }
+	        // now might be the start of a range.
+	        // can be either c-d or c-] or c<more...>] or c] at this point
+	        if (glob.startsWith('-]', i + 1)) {
+	            ranges.push(braceEscape(c + '-'));
+	            i += 2;
+	            continue;
+	        }
+	        if (glob.startsWith('-', i + 1)) {
+	            rangeStart = c;
+	            i += 2;
+	            continue;
+	        }
+	        // not the start of a range, just a single character
+	        ranges.push(braceEscape(c));
+	        i++;
+	    }
+	    if (endPos < i) {
+	        // didn't see the end of the class, not a valid class,
+	        // but might still be valid as a literal match.
+	        return ['', false, 0, false];
+	    }
+	    // if we got no ranges and no negates, then we have a range that
+	    // cannot possibly match anything, and that poisons the whole glob
+	    if (!ranges.length && !negs.length) {
+	        return ['$.', false, glob.length - pos, true];
+	    }
+	    // if we got one positive range, and it's a single character, then that's
+	    // not actually a magic pattern, it's just that one literal character.
+	    // we should not treat that as "magic", we should just return the literal
+	    // character. [_] is a perfectly valid way to escape glob magic chars.
+	    if (negs.length === 0 &&
+	        ranges.length === 1 &&
+	        /^\\?.$/.test(ranges[0]) &&
+	        !negate) {
+	        const r = ranges[0].length === 2 ? ranges[0].slice(-1) : ranges[0];
+	        return [regexpEscape(r), false, endPos - pos, false];
+	    }
+	    const sranges = '[' + (negate ? '^' : '') + rangesToString(ranges) + ']';
+	    const snegs = '[' + (negate ? '' : '^') + rangesToString(negs) + ']';
+	    const comb = ranges.length && negs.length ? '(' + sranges + '|' + snegs + ')'
+	        : ranges.length ? sranges
+	            : snegs;
+	    return [comb, uflag, endPos - pos, true];
+	};
+	braceExpressions.parseClass = parseClass;
+	
+	return braceExpressions;
+}
 
+var _unescape = {};
+
+var hasRequired_unescape;
+
+function require_unescape () {
+	if (hasRequired_unescape) return _unescape;
+	hasRequired_unescape = 1;
+	Object.defineProperty(_unescape, "__esModule", { value: true });
+	_unescape.unescape = void 0;
+	/**
+	 * Un-escape a string that has been escaped with {@link escape}.
+	 *
+	 * If the {@link MinimatchOptions.windowsPathsNoEscape} option is used, then
+	 * square-bracket escapes are removed, but not backslash escapes.
+	 *
+	 * For example, it will turn the string `'[*]'` into `*`, but it will not
+	 * turn `'\\*'` into `'*'`, because `\` is a path separator in
+	 * `windowsPathsNoEscape` mode.
+	 *
+	 * When `windowsPathsNoEscape` is not set, then both square-bracket escapes and
+	 * backslash escapes are removed.
+	 *
+	 * Slashes (and backslashes in `windowsPathsNoEscape` mode) cannot be escaped
+	 * or unescaped.
+	 *
+	 * When `magicalBraces` is not set, escapes of braces (`{` and `}`) will not be
+	 * unescaped.
+	 */
+	const unescape = (s, { windowsPathsNoEscape = false, magicalBraces = true, } = {}) => {
+	    if (magicalBraces) {
+	        return windowsPathsNoEscape ?
+	            s.replace(/\[([^/\\])\]/g, '$1')
+	            : s
+	                .replace(/((?!\\).|^)\[([^/\\])\]/g, '$1$2')
+	                .replace(/\\([^/])/g, '$1');
+	    }
+	    return windowsPathsNoEscape ?
+	        s.replace(/\[([^/\\{}])\]/g, '$1')
+	        : s
+	            .replace(/((?!\\).|^)\[([^/\\{}])\]/g, '$1$2')
+	            .replace(/\\([^/{}])/g, '$1');
+	};
+	_unescape.unescape = unescape;
+	
+	return _unescape;
+}
+
+var hasRequiredAst;
+
+function requireAst () {
+	if (hasRequiredAst) return ast;
+	hasRequiredAst = 1;
+	// parse a single path portion
+	var _a;
+	Object.defineProperty(ast, "__esModule", { value: true });
+	ast.AST = void 0;
+	const brace_expressions_js_1 = requireBraceExpressions();
+	const unescape_js_1 = require_unescape();
+	const types = new Set(['!', '?', '+', '*', '@']);
+	const isExtglobType = (c) => types.has(c);
+	const isExtglobAST = (c) => isExtglobType(c.type);
+	// Map of which extglob types can adopt the children of a nested extglob
+	//
+	// anything but ! can adopt a matching type:
+	// +(a|+(b|c)|d) => +(a|b|c|d)
+	// *(a|*(b|c)|d) => *(a|b|c|d)
+	// @(a|@(b|c)|d) => @(a|b|c|d)
+	// ?(a|?(b|c)|d) => ?(a|b|c|d)
+	//
+	// * can adopt anything, because 0 or repetition is allowed
+	// *(a|?(b|c)|d) => *(a|b|c|d)
+	// *(a|+(b|c)|d) => *(a|b|c|d)
+	// *(a|@(b|c)|d) => *(a|b|c|d)
+	//
+	// + can adopt @, because 1 or repetition is allowed
+	// +(a|@(b|c)|d) => +(a|b|c|d)
+	//
+	// + and @ CANNOT adopt *, because 0 would be allowed
+	// +(a|*(b|c)|d) => would match "", on *(b|c)
+	// @(a|*(b|c)|d) => would match "", on *(b|c)
+	//
+	// + and @ CANNOT adopt ?, because 0 would be allowed
+	// +(a|?(b|c)|d) => would match "", on ?(b|c)
+	// @(a|?(b|c)|d) => would match "", on ?(b|c)
+	//
+	// ? can adopt @, because 0 or 1 is allowed
+	// ?(a|@(b|c)|d) => ?(a|b|c|d)
+	//
+	// ? and @ CANNOT adopt * or +, because >1 would be allowed
+	// ?(a|*(b|c)|d) => would match bbb on *(b|c)
+	// @(a|*(b|c)|d) => would match bbb on *(b|c)
+	// ?(a|+(b|c)|d) => would match bbb on +(b|c)
+	// @(a|+(b|c)|d) => would match bbb on +(b|c)
+	//
+	// ! CANNOT adopt ! (nothing else can either)
+	// !(a|!(b|c)|d) => !(a|b|c|d) would fail to match on b (not not b|c)
+	//
+	// ! can adopt @
+	// !(a|@(b|c)|d) => !(a|b|c|d)
+	//
+	// ! CANNOT adopt *
+	// !(a|*(b|c)|d) => !(a|b|c|d) would match on bbb, not allowed
+	//
+	// ! CANNOT adopt +
+	// !(a|+(b|c)|d) => !(a|b|c|d) would match on bbb, not allowed
+	//
+	// ! CANNOT adopt ?
+	// x!(a|?(b|c)|d) => x!(a|b|c|d) would fail to match "x"
+	const adoptionMap = new Map([
+	    ['!', ['@']],
+	    ['?', ['?', '@']],
+	    ['@', ['@']],
+	    ['*', ['*', '+', '?', '@']],
+	    ['+', ['+', '@']],
+	]);
+	// nested extglobs that can be adopted in, but with the addition of
+	// a blank '' element.
+	const adoptionWithSpaceMap = new Map([
+	    ['!', ['?']],
+	    ['@', ['?']],
+	    ['+', ['?', '*']],
+	]);
+	// union of the previous two maps
+	const adoptionAnyMap = new Map([
+	    ['!', ['?', '@']],
+	    ['?', ['?', '@']],
+	    ['@', ['?', '@']],
+	    ['*', ['*', '+', '?', '@']],
+	    ['+', ['+', '@', '?', '*']],
+	]);
+	// Extglobs that can take over their parent if they are the only child
+	// the key is parent, value maps child to resulting extglob parent type
+	// '@' is omitted because it's a special case. An `@` extglob with a single
+	// member can always be usurped by that subpattern.
+	const usurpMap = new Map([
+	    ['!', new Map([['!', '@']])],
+	    [
+	        '?',
+	        new Map([
+	            ['*', '*'],
+	            ['+', '*'],
+	        ]),
+	    ],
+	    [
+	        '@',
+	        new Map([
+	            ['!', '!'],
+	            ['?', '?'],
+	            ['@', '@'],
+	            ['*', '*'],
+	            ['+', '+'],
+	        ]),
+	    ],
+	    [
+	        '+',
+	        new Map([
+	            ['?', '*'],
+	            ['*', '*'],
+	        ]),
+	    ],
+	]);
+	// Patterns that get prepended to bind to the start of either the
+	// entire string, or just a single path portion, to prevent dots
+	// and/or traversal patterns, when needed.
+	// Exts don't need the ^ or / bit, because the root binds that already.
+	const startNoTraversal = '(?!(?:^|/)\\.\\.?(?:$|/))';
+	const startNoDot = '(?!\\.)';
+	// characters that indicate a start of pattern needs the "no dots" bit,
+	// because a dot *might* be matched. ( is not in the list, because in
+	// the case of a child extglob, it will handle the prevention itself.
+	const addPatternStart = new Set(['[', '.']);
+	// cases where traversal is A-OK, no dot prevention needed
+	const justDots = new Set(['..', '.']);
+	const reSpecials = new Set('().*{}+?[]^$\\!');
+	const regExpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
 	// any single thing other than /
-	// don't need to escape / when using new RegExp()
 	const qmark = '[^/]';
-
 	// * => any number of characters
 	const star = qmark + '*?';
-
-	// ** when dots are allowed.  Anything goes, except .. and .
-	// not (^ or / followed by one or two dots followed by $ or /),
-	// followed by anything, any number of times.
-	const twoStarDot = '(?:(?!(?:\\\/|^)(?:\\.{1,2})($|\\\/)).)*?';
-
-	// not a ^ or / followed by a dot,
-	// followed by anything, any number of times.
-	const twoStarNoDot = '(?:(?!(?:\\\/|^)\\.).)*?';
-
-	// "abc" -> { a:true, b:true, c:true }
-	const charSet = s => s.split('').reduce((set, c) => {
-	  set[c] = true;
-	  return set
-	}, {});
-
-	// characters that need to be escaped in RegExp.
-	const reSpecials = charSet('().*{}+?[]^$\\!');
-
-	// characters that indicate we have to add the pattern start
-	const addPatternStartSet = charSet('[.(');
-
-	// normalizes slashes.
-	const slashSplit = /\/+/;
-
-	minimatch.filter = (pattern, options = {}) =>
-	  (p, i, list) => minimatch(p, pattern, options);
-
-	const ext = (a, b = {}) => {
-	  const t = {};
-	  Object.keys(a).forEach(k => t[k] = a[k]);
-	  Object.keys(b).forEach(k => t[k] = b[k]);
-	  return t
-	};
-
-	minimatch.defaults = def => {
-	  if (!def || typeof def !== 'object' || !Object.keys(def).length) {
-	    return minimatch
-	  }
-
-	  const orig = minimatch;
-
-	  const m = (p, pattern, options) => orig(p, pattern, ext(def, options));
-	  m.Minimatch = class Minimatch extends orig.Minimatch {
-	    constructor (pattern, options) {
-	      super(pattern, ext(def, options));
+	// use + when we need to ensure that *something* matches, because the * is
+	// the only thing in the path portion.
+	const starNoEmpty = qmark + '+?';
+	// remove the \ chars that we added if we end up doing a nonmagic compare
+	// const deslash = (s: string) => s.replace(/\\(.)/g, '$1')
+	let ID = 0;
+	class AST {
+	    type;
+	    #root;
+	    #hasMagic;
+	    #uflag = false;
+	    #parts = [];
+	    #parent;
+	    #parentIndex;
+	    #negs;
+	    #filledNegs = false;
+	    #options;
+	    #toString;
+	    // set to true if it's an extglob with no children
+	    // (which really means one child of '')
+	    #emptyExt = false;
+	    id = ++ID;
+	    get depth() {
+	        return (this.#parent?.depth ?? -1) + 1;
 	    }
-	  };
-	  m.Minimatch.defaults = options => orig.defaults(ext(def, options)).Minimatch;
-	  m.filter = (pattern, options) => orig.filter(pattern, ext(def, options));
-	  m.defaults = options => orig.defaults(ext(def, options));
-	  m.makeRe = (pattern, options) => orig.makeRe(pattern, ext(def, options));
-	  m.braceExpand = (pattern, options) => orig.braceExpand(pattern, ext(def, options));
-	  m.match = (list, pattern, options) => orig.match(list, pattern, ext(def, options));
-
-	  return m
-	};
-
-
-
-
-
-	// Brace expansion:
-	// a{b,c}d -> abd acd
-	// a{b,}c -> abc ac
-	// a{0..3}d -> a0d a1d a2d a3d
-	// a{b,c{d,e}f}g -> abg acdfg acefg
-	// a{b,c}d{e,f}g -> abdeg acdeg abdeg abdfg
-	//
-	// Invalid sets are not expanded.
-	// a{2..}b -> a{2..}b
-	// a{b}c -> a{b}c
-	minimatch.braceExpand = (pattern, options) => braceExpand(pattern, options);
-
-	const braceExpand = (pattern, options = {}) => {
-	  assertValidPattern(pattern);
-
-	  // Thanks to Yeting Li <https://github.com/yetingli> for
-	  // improving this regexp to avoid a ReDOS vulnerability.
-	  if (options.nobrace || !/\{(?:(?!\{).)*\}/.test(pattern)) {
-	    // shortcut. no need to expand.
-	    return [pattern]
-	  }
-
-	  return expand(pattern)
-	};
-
-	const MAX_PATTERN_LENGTH = 1024 * 64;
-	const assertValidPattern = pattern => {
-	  if (typeof pattern !== 'string') {
-	    throw new TypeError('invalid pattern')
-	  }
-
-	  if (pattern.length > MAX_PATTERN_LENGTH) {
-	    throw new TypeError('pattern is too long')
-	  }
-	};
-
-	// parse a component of the expanded set.
-	// At this point, no pattern may contain "/" in it
-	// so we're going to return a 2d array, where each entry is the full
-	// pattern, split on '/', and then turned into a regular expression.
-	// A regexp is made at the end which joins each array with an
-	// escaped /, and another full one which joins each regexp with |.
-	//
-	// Following the lead of Bash 4.1, note that "**" only has special meaning
-	// when it is the *only* thing in a path portion.  Otherwise, any series
-	// of * is equivalent to a single *.  Globstar behavior is enabled by
-	// default, and can be disabled by setting options.noglobstar.
-	const SUBPARSE = Symbol('subparse');
-
-	minimatch.makeRe = (pattern, options) =>
-	  new Minimatch(pattern, options || {}).makeRe();
-
-	minimatch.match = (list, pattern, options = {}) => {
-	  const mm = new Minimatch(pattern, options);
-	  list = list.filter(f => mm.match(f));
-	  if (mm.options.nonull && !list.length) {
-	    list.push(pattern);
-	  }
-	  return list
-	};
-
-	// replace stuff like \* with *
-	const globUnescape = s => s.replace(/\\(.)/g, '$1');
-	const charUnescape = s => s.replace(/\\([^-\]])/g, '$1');
-	const regExpEscape = s => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-	const braExpEscape = s => s.replace(/[[\]\\]/g, '\\$&');
-
-	class Minimatch {
-	  constructor (pattern, options) {
-	    assertValidPattern(pattern);
-
-	    if (!options) options = {};
-
-	    this.options = options;
-	    this.maxGlobstarRecursion = options.maxGlobstarRecursion !== undefined
-	      ? options.maxGlobstarRecursion : 200;
-	    this.set = [];
-	    this.pattern = pattern;
-	    this.windowsPathsNoEscape = !!options.windowsPathsNoEscape ||
-	      options.allowWindowsEscape === false;
-	    if (this.windowsPathsNoEscape) {
-	      this.pattern = this.pattern.replace(/\\/g, '/');
+	    [Symbol.for('nodejs.util.inspect.custom')]() {
+	        return {
+	            '@@type': 'AST',
+	            id: this.id,
+	            type: this.type,
+	            root: this.#root.id,
+	            parent: this.#parent?.id,
+	            depth: this.depth,
+	            partsLength: this.#parts.length,
+	            parts: this.#parts,
+	        };
 	    }
-	    this.regexp = null;
-	    this.negate = false;
-	    this.comment = false;
-	    this.empty = false;
-	    this.partial = !!options.partial;
-
-	    // make the set of regexps etc.
-	    this.make();
-	  }
-
-	  debug () {}
-
-	  make () {
-	    const pattern = this.pattern;
-	    const options = this.options;
-
-	    // empty patterns and comments match nothing.
-	    if (!options.nocomment && pattern.charAt(0) === '#') {
-	      this.comment = true;
-	      return
+	    constructor(type, parent, options = {}) {
+	        this.type = type;
+	        // extglobs are inherently magical
+	        if (type)
+	            this.#hasMagic = true;
+	        this.#parent = parent;
+	        this.#root = this.#parent ? this.#parent.#root : this;
+	        this.#options = this.#root === this ? options : this.#root.#options;
+	        this.#negs = this.#root === this ? [] : this.#root.#negs;
+	        if (type === '!' && !this.#root.#filledNegs)
+	            this.#negs.push(this);
+	        this.#parentIndex = this.#parent ? this.#parent.#parts.length : 0;
 	    }
-	    if (!pattern) {
-	      this.empty = true;
-	      return
-	    }
-
-	    // step 1: figure out negation, etc.
-	    this.parseNegate();
-
-	    // step 2: expand braces
-	    let set = this.globSet = this.braceExpand();
-
-	    if (options.debug) this.debug = (...args) => console.error(...args);
-
-	    this.debug(this.pattern, set);
-
-	    // step 3: now we have a set, so turn each one into a series of path-portion
-	    // matching patterns.
-	    // These will be regexps, except in the case of "**", which is
-	    // set to the GLOBSTAR object for globstar behavior,
-	    // and will not contain any / characters
-	    set = this.globParts = set.map(s => s.split(slashSplit));
-
-	    this.debug(this.pattern, set);
-
-	    // glob --> regexps
-	    set = set.map((s, si, set) => s.map(this.parse, this));
-
-	    this.debug(this.pattern, set);
-
-	    // filter out everything that didn't compile properly.
-	    set = set.filter(s => s.indexOf(false) === -1);
-
-	    this.debug(this.pattern, set);
-
-	    this.set = set;
-	  }
-
-	  parseNegate () {
-	    if (this.options.nonegate) return
-
-	    const pattern = this.pattern;
-	    let negate = false;
-	    let negateOffset = 0;
-
-	    for (let i = 0; i < pattern.length && pattern.charAt(i) === '!'; i++) {
-	      negate = !negate;
-	      negateOffset++;
-	    }
-
-	    if (negateOffset) this.pattern = pattern.slice(negateOffset);
-	    this.negate = negate;
-	  }
-
-	  // set partial to true to test if, for example,
-	  // "/a/b" matches the start of "/*/b/*/d"
-	  // Partial means, if you run out of file before you run
-	  // out of pattern, then that's fine, as long as all
-	  // the parts match.
-	  matchOne (file, pattern, partial) {
-	    if (pattern.indexOf(GLOBSTAR) !== -1) {
-	      return this._matchGlobstar(file, pattern, partial, 0, 0)
-	    }
-	    return this._matchOne(file, pattern, partial, 0, 0)
-	  }
-
-	  _matchGlobstar (file, pattern, partial, fileIndex, patternIndex) {
-	    // find first globstar from patternIndex
-	    let firstgs = -1;
-	    for (let i = patternIndex; i < pattern.length; i++) {
-	      if (pattern[i] === GLOBSTAR) { firstgs = i; break }
-	    }
-
-	    // find last globstar
-	    let lastgs = -1;
-	    for (let i = pattern.length - 1; i >= 0; i--) {
-	      if (pattern[i] === GLOBSTAR) { lastgs = i; break }
-	    }
-
-	    const head = pattern.slice(patternIndex, firstgs);
-	    const body = partial ? pattern.slice(firstgs + 1) : pattern.slice(firstgs + 1, lastgs);
-	    const tail = partial ? [] : pattern.slice(lastgs + 1);
-
-	    // check the head
-	    if (head.length) {
-	      const fileHead = file.slice(fileIndex, fileIndex + head.length);
-	      if (!this._matchOne(fileHead, head, partial, 0, 0)) {
-	        return false
-	      }
-	      fileIndex += head.length;
-	    }
-
-	    // check the tail
-	    let fileTailMatch = 0;
-	    if (tail.length) {
-	      if (tail.length + fileIndex > file.length) return false
-
-	      const tailStart = file.length - tail.length;
-	      if (this._matchOne(file, tail, partial, tailStart, 0)) {
-	        fileTailMatch = tail.length;
-	      } else {
-	        // affordance for stuff like a/**/* matching a/b/
-	        if (file[file.length - 1] !== '' ||
-	            fileIndex + tail.length === file.length) {
-	          return false
+	    get hasMagic() {
+	        /* c8 ignore start */
+	        if (this.#hasMagic !== undefined)
+	            return this.#hasMagic;
+	        /* c8 ignore stop */
+	        for (const p of this.#parts) {
+	            if (typeof p === 'string')
+	                continue;
+	            if (p.type || p.hasMagic)
+	                return (this.#hasMagic = true);
 	        }
-	        if (!this._matchOne(file, tail, partial, tailStart - 1, 0)) {
-	          return false
+	        // note: will be undefined until we generate the regexp src and find out
+	        return this.#hasMagic;
+	    }
+	    // reconstructs the pattern
+	    toString() {
+	        return (this.#toString !== undefined ? this.#toString
+	            : !this.type ?
+	                (this.#toString = this.#parts.map(p => String(p)).join(''))
+	                : (this.#toString =
+	                    this.type +
+	                        '(' +
+	                        this.#parts.map(p => String(p)).join('|') +
+	                        ')'));
+	    }
+	    #fillNegs() {
+	        /* c8 ignore start */
+	        if (this !== this.#root)
+	            throw new Error('should only call on root');
+	        if (this.#filledNegs)
+	            return this;
+	        /* c8 ignore stop */
+	        // call toString() once to fill this out
+	        this.toString();
+	        this.#filledNegs = true;
+	        let n;
+	        while ((n = this.#negs.pop())) {
+	            if (n.type !== '!')
+	                continue;
+	            // walk up the tree, appending everthing that comes AFTER parentIndex
+	            let p = n;
+	            let pp = p.#parent;
+	            while (pp) {
+	                for (let i = p.#parentIndex + 1; !pp.type && i < pp.#parts.length; i++) {
+	                    for (const part of n.#parts) {
+	                        /* c8 ignore start */
+	                        if (typeof part === 'string') {
+	                            throw new Error('string part in extglob AST??');
+	                        }
+	                        /* c8 ignore stop */
+	                        part.copyIn(pp.#parts[i]);
+	                    }
+	                }
+	                p = pp;
+	                pp = p.#parent;
+	            }
 	        }
-	        fileTailMatch = tail.length + 1;
-	      }
+	        return this;
 	    }
-
-	    // if body is empty (single ** between head and tail)
-	    if (!body.length) {
-	      let sawSome = !!fileTailMatch;
-	      for (let i = fileIndex; i < file.length - fileTailMatch; i++) {
-	        const f = String(file[i]);
-	        sawSome = true;
-	        if (f === '.' || f === '..' ||
-	            (!this.options.dot && f.charAt(0) === '.')) {
-	          return false
+	    push(...parts) {
+	        for (const p of parts) {
+	            if (p === '')
+	                continue;
+	            /* c8 ignore start */
+	            if (typeof p !== 'string' &&
+	                !(p instanceof _a && p.#parent === this)) {
+	                throw new Error('invalid part: ' + p);
+	            }
+	            /* c8 ignore stop */
+	            this.#parts.push(p);
 	        }
-	      }
-	      return partial || sawSome
 	    }
-
-	    // split body into segments at each GLOBSTAR
-	    const bodySegments = [[[], 0]];
-	    let currentBody = bodySegments[0];
-	    let nonGsParts = 0;
-	    const nonGsPartsSums = [0];
-	    for (const b of body) {
-	      if (b === GLOBSTAR) {
-	        nonGsPartsSums.push(nonGsParts);
-	        currentBody = [[], 0];
-	        bodySegments.push(currentBody);
-	      } else {
-	        currentBody[0].push(b);
-	        nonGsParts++;
-	      }
-	    }
-
-	    let idx = bodySegments.length - 1;
-	    const fileLength = file.length - fileTailMatch;
-	    for (const b of bodySegments) {
-	      b[1] = fileLength - (nonGsPartsSums[idx--] + b[0].length);
-	    }
-
-	    return !!this._matchGlobStarBodySections(
-	      file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch
-	    )
-	  }
-
-	  // return false for "nope, not matching"
-	  // return null for "not matching, cannot keep trying"
-	  _matchGlobStarBodySections (
-	    file, bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail
-	  ) {
-	    const bs = bodySegments[bodyIndex];
-	    if (!bs) {
-	      // just make sure there are no bad dots
-	      for (let i = fileIndex; i < file.length; i++) {
-	        sawTail = true;
-	        const f = file[i];
-	        if (f === '.' || f === '..' ||
-	            (!this.options.dot && f.charAt(0) === '.')) {
-	          return false
+	    toJSON() {
+	        const ret = this.type === null ?
+	            this.#parts
+	                .slice()
+	                .map(p => (typeof p === 'string' ? p : p.toJSON()))
+	            : [this.type, ...this.#parts.map(p => p.toJSON())];
+	        if (this.isStart() && !this.type)
+	            ret.unshift([]);
+	        if (this.isEnd() &&
+	            (this === this.#root ||
+	                (this.#root.#filledNegs && this.#parent?.type === '!'))) {
+	            ret.push({});
 	        }
-	      }
-	      return sawTail
+	        return ret;
 	    }
-
-	    const [body, after] = bs;
-	    while (fileIndex <= after) {
-	      const m = this._matchOne(
-	        file.slice(0, fileIndex + body.length),
-	        body,
-	        partial,
-	        fileIndex,
-	        0
-	      );
-	      // if limit exceeded, no match. intentional false negative,
-	      // acceptable break in correctness for security.
-	      if (m && globStarDepth < this.maxGlobstarRecursion) {
-	        const sub = this._matchGlobStarBodySections(
-	          file, bodySegments,
-	          fileIndex + body.length, bodyIndex + 1,
-	          partial, globStarDepth + 1, sawTail
-	        );
-	        if (sub !== false) {
-	          return sub
+	    isStart() {
+	        if (this.#root === this)
+	            return true;
+	        // if (this.type) return !!this.#parent?.isStart()
+	        if (!this.#parent?.isStart())
+	            return false;
+	        if (this.#parentIndex === 0)
+	            return true;
+	        // if everything AHEAD of this is a negation, then it's still the "start"
+	        const p = this.#parent;
+	        for (let i = 0; i < this.#parentIndex; i++) {
+	            const pp = p.#parts[i];
+	            if (!(pp instanceof _a && pp.type === '!')) {
+	                return false;
+	            }
 	        }
-	      }
-	      const f = file[fileIndex];
-	      if (f === '.' || f === '..' ||
-	          (!this.options.dot && f.charAt(0) === '.')) {
-	        return false
-	      }
-	      fileIndex++;
+	        return true;
 	    }
-	    return partial || null
-	  }
-
-	  _matchOne (file, pattern, partial, fileIndex, patternIndex) {
-	    let fi, pi, fl, pl;
-	    for (
-	      fi = fileIndex, pi = patternIndex, fl = file.length, pl = pattern.length
-	      ; (fi < fl) && (pi < pl)
-	      ; fi++, pi++
-	    ) {
-	      this.debug('matchOne loop');
-	      const p = pattern[pi];
-	      const f = file[fi];
-
-	      this.debug(pattern, p, f);
-
-	      // should be impossible.
-	      // some invalid regexp stuff in the set.
-	      /* istanbul ignore if */
-	      if (p === false || p === GLOBSTAR) return false
-
-	      // something other than **
-	      // non-magic patterns just have to match exactly
-	      // patterns with magic have been turned into regexps.
-	      let hit;
-	      if (typeof p === 'string') {
-	        hit = f === p;
-	        this.debug('string match', p, f, hit);
-	      } else {
-	        hit = f.match(p);
-	        this.debug('pattern match', p, f, hit);
-	      }
-
-	      if (!hit) return false
+	    isEnd() {
+	        if (this.#root === this)
+	            return true;
+	        if (this.#parent?.type === '!')
+	            return true;
+	        if (!this.#parent?.isEnd())
+	            return false;
+	        if (!this.type)
+	            return this.#parent?.isEnd();
+	        // if not root, it'll always have a parent
+	        /* c8 ignore start */
+	        const pl = this.#parent ? this.#parent.#parts.length : 0;
+	        /* c8 ignore stop */
+	        return this.#parentIndex === pl - 1;
 	    }
-
-	    // now either we fell off the end of the pattern, or we're done.
-	    if (fi === fl && pi === pl) {
-	      // ran out of pattern and filename at the same time.
-	      // an exact hit!
-	      return true
-	    } else if (fi === fl) {
-	      // ran out of file, but still had pattern left.
-	      // this is ok if we're doing the match as part of
-	      // a glob fs traversal.
-	      return partial
-	    } else /* istanbul ignore else */ if (pi === pl) {
-	      // ran out of pattern, still have file left.
-	      // this is only acceptable if we're on the very last
-	      // empty segment of a file with a trailing slash.
-	      // a/* should match a/b/
-	      return (fi === fl - 1) && (file[fi] === '')
+	    copyIn(part) {
+	        if (typeof part === 'string')
+	            this.push(part);
+	        else
+	            this.push(part.clone(this));
 	    }
-
-	    // should be unreachable.
-	    /* istanbul ignore next */
-	    throw new Error('wtf?')
-	  }
-
-	  braceExpand () {
-	    return braceExpand(this.pattern, this.options)
-	  }
-
-	  parse (pattern, isSub) {
-	    assertValidPattern(pattern);
-
-	    const options = this.options;
-
-	    // shortcuts
-	    if (pattern === '**') {
-	      if (!options.noglobstar)
-	        return GLOBSTAR
-	      else
-	        pattern = '*';
-	    }
-	    if (pattern === '') return ''
-
-	    let re = '';
-	    let hasMagic = false;
-	    let escaping = false;
-	    // ? => one single character
-	    const patternListStack = [];
-	    const negativeLists = [];
-	    let stateChar;
-	    let inClass = false;
-	    let reClassStart = -1;
-	    let classStart = -1;
-	    let cs;
-	    let pl;
-	    let sp;
-	    // . and .. never match anything that doesn't start with .,
-	    // even when options.dot is set.  However, if the pattern
-	    // starts with ., then traversal patterns can match.
-	    let dotTravAllowed = pattern.charAt(0) === '.';
-	    let dotFileAllowed = options.dot || dotTravAllowed;
-	    const patternStart = () =>
-	      dotTravAllowed
-	        ? ''
-	        : dotFileAllowed
-	        ? '(?!(?:^|\\/)\\.{1,2}(?:$|\\/))'
-	        : '(?!\\.)';
-	    const subPatternStart = (p) =>
-	      p.charAt(0) === '.'
-	        ? ''
-	        : options.dot
-	        ? '(?!(?:^|\\/)\\.{1,2}(?:$|\\/))'
-	        : '(?!\\.)';
-
-
-	    const clearStateChar = () => {
-	      if (stateChar) {
-	        // we had some state-tracking character
-	        // that wasn't consumed by this pass.
-	        switch (stateChar) {
-	          case '*':
-	            re += star;
-	            hasMagic = true;
-	          break
-	          case '?':
-	            re += qmark;
-	            hasMagic = true;
-	          break
-	          default:
-	            re += '\\' + stateChar;
-	          break
+	    clone(parent) {
+	        const c = new _a(this.type, parent);
+	        for (const p of this.#parts) {
+	            c.copyIn(p);
 	        }
-	        this.debug('clearStateChar %j %j', stateChar, re);
-	        stateChar = false;
-	      }
-	    };
-
-	    for (let i = 0, c; (i < pattern.length) && (c = pattern.charAt(i)); i++) {
-	      this.debug('%s\t%s %s %j', pattern, i, re, c);
-
-	      // skip over any that are escaped.
-	      if (escaping) {
-	        /* istanbul ignore next - completely not allowed, even escaped. */
-	        if (c === '/') {
-	          return false
+	        return c;
+	    }
+	    static #parseAST(str, ast, pos, opt, extDepth) {
+	        const maxDepth = opt.maxExtglobRecursion ?? 2;
+	        let escaping = false;
+	        let inBrace = false;
+	        let braceStart = -1;
+	        let braceNeg = false;
+	        if (ast.type === null) {
+	            // outside of a extglob, append until we find a start
+	            let i = pos;
+	            let acc = '';
+	            while (i < str.length) {
+	                const c = str.charAt(i++);
+	                // still accumulate escapes at this point, but we do ignore
+	                // starts that are escaped
+	                if (escaping || c === '\\') {
+	                    escaping = !escaping;
+	                    acc += c;
+	                    continue;
+	                }
+	                if (inBrace) {
+	                    if (i === braceStart + 1) {
+	                        if (c === '^' || c === '!') {
+	                            braceNeg = true;
+	                        }
+	                    }
+	                    else if (c === ']' && !(i === braceStart + 2 && braceNeg)) {
+	                        inBrace = false;
+	                    }
+	                    acc += c;
+	                    continue;
+	                }
+	                else if (c === '[') {
+	                    inBrace = true;
+	                    braceStart = i;
+	                    braceNeg = false;
+	                    acc += c;
+	                    continue;
+	                }
+	                // we don't have to check for adoption here, because that's
+	                // done at the other recursion point.
+	                const doRecurse = !opt.noext &&
+	                    isExtglobType(c) &&
+	                    str.charAt(i) === '(' &&
+	                    extDepth <= maxDepth;
+	                if (doRecurse) {
+	                    ast.push(acc);
+	                    acc = '';
+	                    const ext = new _a(c, ast);
+	                    i = _a.#parseAST(str, ext, i, opt, extDepth + 1);
+	                    ast.push(ext);
+	                    continue;
+	                }
+	                acc += c;
+	            }
+	            ast.push(acc);
+	            return i;
 	        }
-
-	        if (reSpecials[c]) {
-	          re += '\\';
+	        // some kind of extglob, pos is at the (
+	        // find the next | or )
+	        let i = pos + 1;
+	        let part = new _a(null, ast);
+	        const parts = [];
+	        let acc = '';
+	        while (i < str.length) {
+	            const c = str.charAt(i++);
+	            // still accumulate escapes at this point, but we do ignore
+	            // starts that are escaped
+	            if (escaping || c === '\\') {
+	                escaping = !escaping;
+	                acc += c;
+	                continue;
+	            }
+	            if (inBrace) {
+	                if (i === braceStart + 1) {
+	                    if (c === '^' || c === '!') {
+	                        braceNeg = true;
+	                    }
+	                }
+	                else if (c === ']' && !(i === braceStart + 2 && braceNeg)) {
+	                    inBrace = false;
+	                }
+	                acc += c;
+	                continue;
+	            }
+	            else if (c === '[') {
+	                inBrace = true;
+	                braceStart = i;
+	                braceNeg = false;
+	                acc += c;
+	                continue;
+	            }
+	            const doRecurse = !opt.noext &&
+	                isExtglobType(c) &&
+	                str.charAt(i) === '(' &&
+	                /* c8 ignore start - the maxDepth is sufficient here */
+	                (extDepth <= maxDepth || (ast && ast.#canAdoptType(c)));
+	            /* c8 ignore stop */
+	            if (doRecurse) {
+	                const depthAdd = ast && ast.#canAdoptType(c) ? 0 : 1;
+	                part.push(acc);
+	                acc = '';
+	                const ext = new _a(c, part);
+	                part.push(ext);
+	                i = _a.#parseAST(str, ext, i, opt, extDepth + depthAdd);
+	                continue;
+	            }
+	            if (c === '|') {
+	                part.push(acc);
+	                acc = '';
+	                parts.push(part);
+	                part = new _a(null, ast);
+	                continue;
+	            }
+	            if (c === ')') {
+	                if (acc === '' && ast.#parts.length === 0) {
+	                    ast.#emptyExt = true;
+	                }
+	                part.push(acc);
+	                acc = '';
+	                ast.push(...parts, part);
+	                return i;
+	            }
+	            acc += c;
 	        }
-	        re += c;
-	        escaping = false;
-	        continue
-	      }
-
-	      switch (c) {
-	        /* istanbul ignore next */
-	        case '/': {
-	          // Should already be path-split by now.
-	          return false
+	        // unfinished extglob
+	        // if we got here, it was a malformed extglob! not an extglob, but
+	        // maybe something else in there.
+	        ast.type = null;
+	        ast.#hasMagic = undefined;
+	        ast.#parts = [str.substring(pos - 1)];
+	        return i;
+	    }
+	    #canAdoptWithSpace(child) {
+	        return this.#canAdopt(child, adoptionWithSpaceMap);
+	    }
+	    #canAdopt(child, map = adoptionMap) {
+	        if (!child ||
+	            typeof child !== 'object' ||
+	            child.type !== null ||
+	            child.#parts.length !== 1 ||
+	            this.type === null) {
+	            return false;
 	        }
-
-	        case '\\':
-	          if (inClass && pattern.charAt(i + 1) === '-') {
-	            re += c;
-	            continue
-	          }
-
-	          clearStateChar();
-	          escaping = true;
-	        continue
-
-	        // the various stateChar values
-	        // for the "extglob" stuff.
-	        case '?':
-	        case '*':
-	        case '+':
-	        case '@':
-	        case '!':
-	          this.debug('%s\t%s %s %j <-- stateChar', pattern, i, re, c);
-
-	          // all of those are literals inside a class, except that
-	          // the glob [!a] means [^a] in regexp
-	          if (inClass) {
-	            this.debug('  in class');
-	            if (c === '!' && i === classStart + 1) c = '^';
-	            re += c;
-	            continue
-	          }
-
-	          // coalesce consecutive non-globstar * characters
-	          if (c === '*' && stateChar === '*') continue
-
-	          // if we already have a stateChar, then it means
-	          // that there was something like ** or +? in there.
-	          // Handle the stateChar, then proceed with this one.
-	          this.debug('call clearStateChar %j', stateChar);
-	          clearStateChar();
-	          stateChar = c;
-	          // if extglob is disabled, then +(asdf|foo) isn't a thing.
-	          // just clear the statechar *now*, rather than even diving into
-	          // the patternList stuff.
-	          if (options.noext) clearStateChar();
-	        continue
-
-	        case '(': {
-	          if (inClass) {
-	            re += '(';
-	            continue
-	          }
-
-	          if (!stateChar) {
-	            re += '\\(';
-	            continue
-	          }
-
-	          const plEntry = {
-	            type: stateChar,
-	            start: i - 1,
-	            reStart: re.length,
-	            open: plTypes[stateChar].open,
-	            close: plTypes[stateChar].close,
-	          };
-	          this.debug(this.pattern, '\t', plEntry);
-	          patternListStack.push(plEntry);
-	          // negation is (?:(?!(?:js)(?:<rest>))[^/]*)
-	          re += plEntry.open;
-	          // next entry starts with a dot maybe?
-	          if (plEntry.start === 0 && plEntry.type !== '!') {
-	            dotTravAllowed = true;
-	            re += subPatternStart(pattern.slice(i + 1));
-	          }
-	          this.debug('plType %j %j', stateChar, re);
-	          stateChar = false;
-	          continue
+	        const gc = child.#parts[0];
+	        if (!gc || typeof gc !== 'object' || gc.type === null) {
+	            return false;
 	        }
-
-	        case ')': {
-	          const plEntry = patternListStack[patternListStack.length - 1];
-	          if (inClass || !plEntry) {
-	            re += '\\)';
-	            continue
-	          }
-	          patternListStack.pop();
-
-	          // closing an extglob
-	          clearStateChar();
-	          hasMagic = true;
-	          pl = plEntry;
-	          // negation is (?:(?!js)[^/]*)
-	          // The others are (?:<pattern>)<type>
-	          re += pl.close;
-	          if (pl.type === '!') {
-	            negativeLists.push(Object.assign(pl, { reEnd: re.length }));
-	          }
-	          continue
+	        return this.#canAdoptType(gc.type, map);
+	    }
+	    #canAdoptType(c, map = adoptionAnyMap) {
+	        return !!map.get(this.type)?.includes(c);
+	    }
+	    #adoptWithSpace(child, index) {
+	        const gc = child.#parts[0];
+	        const blank = new _a(null, gc, this.options);
+	        blank.#parts.push('');
+	        gc.push(blank);
+	        this.#adopt(child, index);
+	    }
+	    #adopt(child, index) {
+	        const gc = child.#parts[0];
+	        this.#parts.splice(index, 1, ...gc.#parts);
+	        for (const p of gc.#parts) {
+	            if (typeof p === 'object')
+	                p.#parent = this;
 	        }
-
-	        case '|': {
-	          const plEntry = patternListStack[patternListStack.length - 1];
-	          if (inClass || !plEntry) {
-	            re += '\\|';
-	            continue
-	          }
-
-	          clearStateChar();
-	          re += '|';
-	          // next subpattern can start with a dot?
-	          if (plEntry.start === 0 && plEntry.type !== '!') {
-	            dotTravAllowed = true;
-	            re += subPatternStart(pattern.slice(i + 1));
-	          }
-	          continue
+	        this.#toString = undefined;
+	    }
+	    #canUsurpType(c) {
+	        const m = usurpMap.get(this.type);
+	        return !!m?.has(c);
+	    }
+	    #canUsurp(child) {
+	        if (!child ||
+	            typeof child !== 'object' ||
+	            child.type !== null ||
+	            child.#parts.length !== 1 ||
+	            this.type === null ||
+	            this.#parts.length !== 1) {
+	            return false;
 	        }
-
-	        // these are mostly the same in regexp and glob
-	        case '[':
-	          // swallow any state-tracking char before the [
-	          clearStateChar();
-
-	          if (inClass) {
-	            re += '\\' + c;
-	            continue
-	          }
-
-	          inClass = true;
-	          classStart = i;
-	          reClassStart = re.length;
-	          re += c;
-	        continue
-
-	        case ']':
-	          //  a right bracket shall lose its special
-	          //  meaning and represent itself in
-	          //  a bracket expression if it occurs
-	          //  first in the list.  -- POSIX.2 2.8.3.2
-	          if (i === classStart + 1 || !inClass) {
-	            re += '\\' + c;
-	            continue
-	          }
-
-	          // split where the last [ was, make sure we don't have
-	          // an invalid re. if so, re-walk the contents of the
-	          // would-be class to re-translate any characters that
-	          // were passed through as-is
-	          // TODO: It would probably be faster to determine this
-	          // without a try/catch and a new RegExp, but it's tricky
-	          // to do safely.  For now, this is safe and works.
-	          cs = pattern.substring(classStart + 1, i);
-	          try {
-	            RegExp('[' + braExpEscape(charUnescape(cs)) + ']');
-	            // looks good, finish up the class.
-	            re += c;
-	          } catch (er) {
-	            // out of order ranges in JS are errors, but in glob syntax,
-	            // they're just a range that matches nothing.
-	            re = re.substring(0, reClassStart) + '(?:$.)'; // match nothing ever
-	          }
-	          hasMagic = true;
-	          inClass = false;
-	        continue
-
-	        default:
-	          // swallow any state char that wasn't consumed
-	          clearStateChar();
-
-	          if (reSpecials[c] && !(c === '^' && inClass)) {
-	            re += '\\';
-	          }
-
-	          re += c;
-	          break
-
-	      } // switch
-	    } // for
-
-	    // handle the case where we left a class open.
-	    // "[abc" is valid, equivalent to "\[abc"
-	    if (inClass) {
-	      // split where the last [ was, and escape it
-	      // this is a huge pita.  We now have to re-walk
-	      // the contents of the would-be class to re-translate
-	      // any characters that were passed through as-is
-	      cs = pattern.slice(classStart + 1);
-	      sp = this.parse(cs, SUBPARSE);
-	      re = re.substring(0, reClassStart) + '\\[' + sp[0];
-	      hasMagic = hasMagic || sp[1];
-	    }
-
-	    // handle the case where we had a +( thing at the *end*
-	    // of the pattern.
-	    // each pattern list stack adds 3 chars, and we need to go through
-	    // and escape any | chars that were passed through as-is for the regexp.
-	    // Go through and escape them, taking care not to double-escape any
-	    // | chars that were already escaped.
-	    for (pl = patternListStack.pop(); pl; pl = patternListStack.pop()) {
-	      let tail;
-	      tail = re.slice(pl.reStart + pl.open.length);
-	      this.debug('setting tail', re, pl);
-	      // maybe some even number of \, then maybe 1 \, followed by a |
-	      tail = tail.replace(/((?:\\{2}){0,64})(\\?)\|/g, (_, $1, $2) => {
-	        /* istanbul ignore else - should already be done */
-	        if (!$2) {
-	          // the | isn't already escaped, so escape it.
-	          $2 = '\\';
+	        const gc = child.#parts[0];
+	        if (!gc || typeof gc !== 'object' || gc.type === null) {
+	            return false;
 	        }
-
-	        // need to escape all those slashes *again*, without escaping the
-	        // one that we need for escaping the | character.  As it works out,
-	        // escaping an even number of slashes can be done by simply repeating
-	        // it exactly after itself.  That's why this trick works.
-	        //
-	        // I am sorry that you have to see this.
-	        return $1 + $1 + $2 + '|'
-	      });
-
-	      this.debug('tail=%j\n   %s', tail, tail, pl, re);
-	      const t = pl.type === '*' ? star
-	        : pl.type === '?' ? qmark
-	        : '\\' + pl.type;
-
-	      hasMagic = true;
-	      re = re.slice(0, pl.reStart) + t + '\\(' + tail;
+	        return this.#canUsurpType(gc.type);
 	    }
-
-	    // handle trailing things that only matter at the very end.
-	    clearStateChar();
-	    if (escaping) {
-	      // trailing \\
-	      re += '\\\\';
+	    #usurp(child) {
+	        const m = usurpMap.get(this.type);
+	        const gc = child.#parts[0];
+	        const nt = m?.get(gc.type);
+	        /* c8 ignore start - impossible */
+	        if (!nt)
+	            return false;
+	        /* c8 ignore stop */
+	        this.#parts = gc.#parts;
+	        for (const p of this.#parts) {
+	            if (typeof p === 'object') {
+	                p.#parent = this;
+	            }
+	        }
+	        this.type = nt;
+	        this.#toString = undefined;
+	        this.#emptyExt = false;
 	    }
-
-	    // only need to apply the nodot start if the re starts with
-	    // something that could conceivably capture a dot
-	    const addPatternStart = addPatternStartSet[re.charAt(0)];
-
-	    // Hack to work around lack of negative lookbehind in JS
-	    // A pattern like: *.!(x).!(y|z) needs to ensure that a name
-	    // like 'a.xyz.yz' doesn't match.  So, the first negative
-	    // lookahead, has to look ALL the way ahead, to the end of
-	    // the pattern.
-	    for (let n = negativeLists.length - 1; n > -1; n--) {
-	      const nl = negativeLists[n];
-
-	      const nlBefore = re.slice(0, nl.reStart);
-	      const nlFirst = re.slice(nl.reStart, nl.reEnd - 8);
-	      let nlAfter = re.slice(nl.reEnd);
-	      const nlLast = re.slice(nl.reEnd - 8, nl.reEnd) + nlAfter;
-
-	      // Handle nested stuff like *(*.js|!(*.json)), where open parens
-	      // mean that we should *not* include the ) in the bit that is considered
-	      // "after" the negated section.
-	      const closeParensBefore = nlBefore.split(')').length;
-	      const openParensBefore = nlBefore.split('(').length - closeParensBefore;
-	      let cleanAfter = nlAfter;
-	      for (let i = 0; i < openParensBefore; i++) {
-	        cleanAfter = cleanAfter.replace(/\)[+*?]?/, '');
-	      }
-	      nlAfter = cleanAfter;
-
-	      const dollar = nlAfter === '' && isSub !== SUBPARSE ? '(?:$|\\/)' : '';
-
-	      re = nlBefore + nlFirst + nlAfter + dollar + nlLast;
+	    static fromGlob(pattern, options = {}) {
+	        const ast = new _a(null, undefined, options);
+	        _a.#parseAST(pattern, ast, 0, options, 0);
+	        return ast;
 	    }
-
-	    // if the re is not "" at this point, then we need to make sure
-	    // it doesn't match against an empty path part.
-	    // Otherwise a/* will match a/, which it should not.
-	    if (re !== '' && hasMagic) {
-	      re = '(?=.)' + re;
+	    // returns the regular expression if there's magic, or the unescaped
+	    // string if not.
+	    toMMPattern() {
+	        // should only be called on root
+	        /* c8 ignore start */
+	        if (this !== this.#root)
+	            return this.#root.toMMPattern();
+	        /* c8 ignore stop */
+	        const glob = this.toString();
+	        const [re, body, hasMagic, uflag] = this.toRegExpSource();
+	        // if we're in nocase mode, and not nocaseMagicOnly, then we do
+	        // still need a regular expression if we have to case-insensitively
+	        // match capital/lowercase characters.
+	        const anyMagic = hasMagic ||
+	            this.#hasMagic ||
+	            (this.#options.nocase &&
+	                !this.#options.nocaseMagicOnly &&
+	                glob.toUpperCase() !== glob.toLowerCase());
+	        if (!anyMagic) {
+	            return body;
+	        }
+	        const flags = (this.#options.nocase ? 'i' : '') + (uflag ? 'u' : '');
+	        return Object.assign(new RegExp(`^${re}$`, flags), {
+	            _src: re,
+	            _glob: glob,
+	        });
 	    }
-
-	    if (addPatternStart) {
-	      re = patternStart() + re;
+	    get options() {
+	        return this.#options;
 	    }
-
-	    // parsing just a piece of a larger pattern.
-	    if (isSub === SUBPARSE) {
-	      return [re, hasMagic]
-	    }
-
-	    // if it's nocase, and the lcase/uppercase don't match, it's magic
-	    if (options.nocase && !hasMagic) {
-	      hasMagic = pattern.toUpperCase() !== pattern.toLowerCase();
-	    }
-
-	    // skip the regexp for non-magical patterns
-	    // unescape anything in it, though, so that it'll be
-	    // an exact match against a file etc.
-	    if (!hasMagic) {
-	      return globUnescape(pattern)
-	    }
-
-	    const flags = options.nocase ? 'i' : '';
-	    try {
-	      return Object.assign(new RegExp('^' + re + '$', flags), {
-	        _glob: pattern,
-	        _src: re,
-	      })
-	    } catch (er) /* istanbul ignore next - should be impossible */ {
-	      // If it was an invalid regular expression, then it can't match
-	      // anything.  This trick looks for a character after the end of
-	      // the string, which is of course impossible, except in multi-line
-	      // mode, but it's not a /m regex.
-	      return new RegExp('$.')
-	    }
-	  }
-
-	  makeRe () {
-	    if (this.regexp || this.regexp === false) return this.regexp
-
-	    // at this point, this.set is a 2d array of partial
-	    // pattern strings, or "**".
+	    // returns the string match, the regexp source, whether there's magic
+	    // in the regexp (so a regular expression is required) and whether or
+	    // not the uflag is needed for the regular expression (for posix classes)
+	    // TODO: instead of injecting the start/end at this point, just return
+	    // the BODY of the regexp, along with the start/end portions suitable
+	    // for binding the start/end in either a joined full-path makeRe context
+	    // (where we bind to (^|/), or a standalone matchPart context (where
+	    // we bind to ^, and not /).  Otherwise slashes get duped!
 	    //
-	    // It's better to use .match().  This function shouldn't
-	    // be used, really, but it's pretty convenient sometimes,
-	    // when you just want to work with a regex.
-	    const set = this.set;
-
-	    if (!set.length) {
-	      this.regexp = false;
-	      return this.regexp
-	    }
-	    const options = this.options;
-
-	    const twoStar = options.noglobstar ? star
-	      : options.dot ? twoStarDot
-	      : twoStarNoDot;
-	    const flags = options.nocase ? 'i' : '';
-
-	    // coalesce globstars and regexpify non-globstar patterns
-	    // if it's the only item, then we just do one twoStar
-	    // if it's the first, and there are more, prepend (\/|twoStar\/)? to next
-	    // if it's the last, append (\/twoStar|) to previous
-	    // if it's in the middle, append (\/|\/twoStar\/) to previous
-	    // then filter out GLOBSTAR symbols
-	    let re = set.map(pattern => {
-	      pattern = pattern.map(p =>
-	        typeof p === 'string' ? regExpEscape(p)
-	        : p === GLOBSTAR ? GLOBSTAR
-	        : p._src
-	      ).reduce((set, p) => {
-	        if (!(set[set.length - 1] === GLOBSTAR && p === GLOBSTAR)) {
-	          set.push(p);
+	    // In part-matching mode, the start is:
+	    // - if not isStart: nothing
+	    // - if traversal possible, but not allowed: ^(?!\.\.?$)
+	    // - if dots allowed or not possible: ^
+	    // - if dots possible and not allowed: ^(?!\.)
+	    // end is:
+	    // - if not isEnd(): nothing
+	    // - else: $
+	    //
+	    // In full-path matching mode, we put the slash at the START of the
+	    // pattern, so start is:
+	    // - if first pattern: same as part-matching mode
+	    // - if not isStart(): nothing
+	    // - if traversal possible, but not allowed: /(?!\.\.?(?:$|/))
+	    // - if dots allowed or not possible: /
+	    // - if dots possible and not allowed: /(?!\.)
+	    // end is:
+	    // - if last pattern, same as part-matching mode
+	    // - else nothing
+	    //
+	    // Always put the (?:$|/) on negated tails, though, because that has to be
+	    // there to bind the end of the negated pattern portion, and it's easier to
+	    // just stick it in now rather than try to inject it later in the middle of
+	    // the pattern.
+	    //
+	    // We can just always return the same end, and leave it up to the caller
+	    // to know whether it's going to be used joined or in parts.
+	    // And, if the start is adjusted slightly, can do the same there:
+	    // - if not isStart: nothing
+	    // - if traversal possible, but not allowed: (?:/|^)(?!\.\.?$)
+	    // - if dots allowed or not possible: (?:/|^)
+	    // - if dots possible and not allowed: (?:/|^)(?!\.)
+	    //
+	    // But it's better to have a simpler binding without a conditional, for
+	    // performance, so probably better to return both start options.
+	    //
+	    // Then the caller just ignores the end if it's not the first pattern,
+	    // and the start always gets applied.
+	    //
+	    // But that's always going to be $ if it's the ending pattern, or nothing,
+	    // so the caller can just attach $ at the end of the pattern when building.
+	    //
+	    // So the todo is:
+	    // - better detect what kind of start is needed
+	    // - return both flavors of starting pattern
+	    // - attach $ at the end of the pattern when creating the actual RegExp
+	    //
+	    // Ah, but wait, no, that all only applies to the root when the first pattern
+	    // is not an extglob. If the first pattern IS an extglob, then we need all
+	    // that dot prevention biz to live in the extglob portions, because eg
+	    // +(*|.x*) can match .xy but not .yx.
+	    //
+	    // So, return the two flavors if it's #root and the first child is not an
+	    // AST, otherwise leave it to the child AST to handle it, and there,
+	    // use the (?:^|/) style of start binding.
+	    //
+	    // Even simplified further:
+	    // - Since the start for a join is eg /(?!\.) and the start for a part
+	    // is ^(?!\.), we can just prepend (?!\.) to the pattern (either root
+	    // or start or whatever) and prepend ^ or / at the Regexp construction.
+	    toRegExpSource(allowDot) {
+	        const dot = allowDot ?? !!this.#options.dot;
+	        if (this.#root === this) {
+	            this.#flatten();
+	            this.#fillNegs();
 	        }
-	        return set
-	      }, []);
-	      pattern.forEach((p, i) => {
-	        if (p !== GLOBSTAR || pattern[i-1] === GLOBSTAR) {
-	          return
+	        if (!isExtglobAST(this)) {
+	            const noEmpty = this.isStart() &&
+	                this.isEnd() &&
+	                !this.#parts.some(s => typeof s !== 'string');
+	            const src = this.#parts
+	                .map(p => {
+	                const [re, _, hasMagic, uflag] = typeof p === 'string' ?
+	                    _a.#parseGlob(p, this.#hasMagic, noEmpty)
+	                    : p.toRegExpSource(allowDot);
+	                this.#hasMagic = this.#hasMagic || hasMagic;
+	                this.#uflag = this.#uflag || uflag;
+	                return re;
+	            })
+	                .join('');
+	            let start = '';
+	            if (this.isStart()) {
+	                if (typeof this.#parts[0] === 'string') {
+	                    // this is the string that will match the start of the pattern,
+	                    // so we need to protect against dots and such.
+	                    // '.' and '..' cannot match unless the pattern is that exactly,
+	                    // even if it starts with . or dot:true is set.
+	                    const dotTravAllowed = this.#parts.length === 1 && justDots.has(this.#parts[0]);
+	                    if (!dotTravAllowed) {
+	                        const aps = addPatternStart;
+	                        // check if we have a possibility of matching . or ..,
+	                        // and prevent that.
+	                        const needNoTrav = 
+	                        // dots are allowed, and the pattern starts with [ or .
+	                        (dot && aps.has(src.charAt(0))) ||
+	                            // the pattern starts with \., and then [ or .
+	                            (src.startsWith('\\.') && aps.has(src.charAt(2))) ||
+	                            // the pattern starts with \.\., and then [ or .
+	                            (src.startsWith('\\.\\.') && aps.has(src.charAt(4)));
+	                        // no need to prevent dots if it can't match a dot, or if a
+	                        // sub-pattern will be preventing it anyway.
+	                        const needNoDot = !dot && !allowDot && aps.has(src.charAt(0));
+	                        start =
+	                            needNoTrav ? startNoTraversal
+	                                : needNoDot ? startNoDot
+	                                    : '';
+	                    }
+	                }
+	            }
+	            // append the "end of path portion" pattern to negation tails
+	            let end = '';
+	            if (this.isEnd() &&
+	                this.#root.#filledNegs &&
+	                this.#parent?.type === '!') {
+	                end = '(?:$|\\/)';
+	            }
+	            const final = start + src + end;
+	            return [
+	                final,
+	                (0, unescape_js_1.unescape)(src),
+	                (this.#hasMagic = !!this.#hasMagic),
+	                this.#uflag,
+	            ];
 	        }
-	        if (i === 0) {
-	          if (pattern.length > 1) {
-	            pattern[i+1] = '(?:\\\/|' + twoStar + '\\\/)?' + pattern[i+1];
-	          } else {
-	            pattern[i] = twoStar;
-	          }
-	        } else if (i === pattern.length - 1) {
-	          pattern[i-1] += '(?:\\\/|' + twoStar + ')?';
-	        } else {
-	          pattern[i-1] += '(?:\\\/|\\\/' + twoStar + '\\\/)' + pattern[i+1];
-	          pattern[i+1] = GLOBSTAR;
+	        // We need to calculate the body *twice* if it's a repeat pattern
+	        // at the start, once in nodot mode, then again in dot mode, so a
+	        // pattern like *(?) can match 'x.y'
+	        const repeated = this.type === '*' || this.type === '+';
+	        // some kind of extglob
+	        const start = this.type === '!' ? '(?:(?!(?:' : '(?:';
+	        let body = this.#partsToRegExp(dot);
+	        if (this.isStart() && this.isEnd() && !body && this.type !== '!') {
+	            // invalid extglob, has to at least be *something* present, if it's
+	            // the entire path portion.
+	            const s = this.toString();
+	            const me = this;
+	            me.#parts = [s];
+	            me.type = null;
+	            me.#hasMagic = undefined;
+	            return [s, (0, unescape_js_1.unescape)(this.toString()), false, false];
 	        }
-	      });
-	      return pattern.filter(p => p !== GLOBSTAR).join('/')
-	    }).join('|');
-
-	    // must match entire pattern
-	    // ending in a * or ** will make it less strict.
-	    re = '^(?:' + re + ')$';
-
-	    // can match anything, as long as it's not this.
-	    if (this.negate) re = '^(?!' + re + ').*$';
-
-	    try {
-	      this.regexp = new RegExp(re, flags);
-	    } catch (ex) /* istanbul ignore next - should be impossible */ {
-	      this.regexp = false;
+	        let bodyDotAllowed = !repeated || allowDot || dot || !startNoDot ?
+	            ''
+	            : this.#partsToRegExp(true);
+	        if (bodyDotAllowed === body) {
+	            bodyDotAllowed = '';
+	        }
+	        if (bodyDotAllowed) {
+	            body = `(?:${body})(?:${bodyDotAllowed})*?`;
+	        }
+	        // an empty !() is exactly equivalent to a starNoEmpty
+	        let final = '';
+	        if (this.type === '!' && this.#emptyExt) {
+	            final = (this.isStart() && !dot ? startNoDot : '') + starNoEmpty;
+	        }
+	        else {
+	            const close = this.type === '!' ?
+	                // !() must match something,but !(x) can match ''
+	                '))' +
+	                    (this.isStart() && !dot && !allowDot ? startNoDot : '') +
+	                    star +
+	                    ')'
+	                : this.type === '@' ? ')'
+	                    : this.type === '?' ? ')?'
+	                        : this.type === '+' && bodyDotAllowed ? ')'
+	                            : this.type === '*' && bodyDotAllowed ? `)?`
+	                                : `)${this.type}`;
+	            final = start + body + close;
+	        }
+	        return [
+	            final,
+	            (0, unescape_js_1.unescape)(body),
+	            (this.#hasMagic = !!this.#hasMagic),
+	            this.#uflag,
+	        ];
 	    }
-	    return this.regexp
-	  }
-
-	  match (f, partial = this.partial) {
-	    this.debug('match', f, this.pattern);
-	    // short-circuit in the case of busted things.
-	    // comments, etc.
-	    if (this.comment) return false
-	    if (this.empty) return f === ''
-
-	    if (f === '/' && partial) return true
-
-	    const options = this.options;
-
-	    // windows: need to use /, not \
-	    if (path.sep !== '/') {
-	      f = f.split(path.sep).join('/');
+	    #flatten() {
+	        if (!isExtglobAST(this)) {
+	            for (const p of this.#parts) {
+	                if (typeof p === 'object') {
+	                    p.#flatten();
+	                }
+	            }
+	        }
+	        else {
+	            // do up to 10 passes to flatten as much as possible
+	            let iterations = 0;
+	            let done = false;
+	            do {
+	                done = true;
+	                for (let i = 0; i < this.#parts.length; i++) {
+	                    const c = this.#parts[i];
+	                    if (typeof c === 'object') {
+	                        c.#flatten();
+	                        if (this.#canAdopt(c)) {
+	                            done = false;
+	                            this.#adopt(c, i);
+	                        }
+	                        else if (this.#canAdoptWithSpace(c)) {
+	                            done = false;
+	                            this.#adoptWithSpace(c, i);
+	                        }
+	                        else if (this.#canUsurp(c)) {
+	                            done = false;
+	                            this.#usurp(c);
+	                        }
+	                    }
+	                }
+	            } while (!done && ++iterations < 10);
+	        }
+	        this.#toString = undefined;
 	    }
-
-	    // treat the test path as a set of pathparts.
-	    f = f.split(slashSplit);
-	    this.debug(this.pattern, 'split', f);
-
-	    // just ONE of the pattern sets in this.set needs to match
-	    // in order for it to be valid.  If negating, then just one
-	    // match means that we have failed.
-	    // Either way, return on the first hit.
-
-	    const set = this.set;
-	    this.debug(this.pattern, 'set', set);
-
-	    // Find the basename of the path by looking for the last non-empty segment
-	    let filename;
-	    for (let i = f.length - 1; i >= 0; i--) {
-	      filename = f[i];
-	      if (filename) break
+	    #partsToRegExp(dot) {
+	        return this.#parts
+	            .map(p => {
+	            // extglob ASTs should only contain parent ASTs
+	            /* c8 ignore start */
+	            if (typeof p === 'string') {
+	                throw new Error('string type in extglob ast??');
+	            }
+	            /* c8 ignore stop */
+	            // can ignore hasMagic, because extglobs are already always magic
+	            const [re, _, _hasMagic, uflag] = p.toRegExpSource(dot);
+	            this.#uflag = this.#uflag || uflag;
+	            return re;
+	        })
+	            .filter(p => !(this.isStart() && this.isEnd()) || !!p)
+	            .join('|');
 	    }
-
-	    for (let i = 0; i < set.length; i++) {
-	      const pattern = set[i];
-	      let file = f;
-	      if (options.matchBase && pattern.length === 1) {
-	        file = [filename];
-	      }
-	      const hit = this.matchOne(file, pattern, partial);
-	      if (hit) {
-	        if (options.flipNegate) return true
-	        return !this.negate
-	      }
+	    static #parseGlob(glob, hasMagic, noEmpty = false) {
+	        let escaping = false;
+	        let re = '';
+	        let uflag = false;
+	        // multiple stars that aren't globstars coalesce into one *
+	        let inStar = false;
+	        for (let i = 0; i < glob.length; i++) {
+	            const c = glob.charAt(i);
+	            if (escaping) {
+	                escaping = false;
+	                re += (reSpecials.has(c) ? '\\' : '') + c;
+	                continue;
+	            }
+	            if (c === '*') {
+	                if (inStar)
+	                    continue;
+	                inStar = true;
+	                re += noEmpty && /^[*]+$/.test(glob) ? starNoEmpty : star;
+	                hasMagic = true;
+	                continue;
+	            }
+	            else {
+	                inStar = false;
+	            }
+	            if (c === '\\') {
+	                if (i === glob.length - 1) {
+	                    re += '\\\\';
+	                }
+	                else {
+	                    escaping = true;
+	                }
+	                continue;
+	            }
+	            if (c === '[') {
+	                const [src, needUflag, consumed, magic] = (0, brace_expressions_js_1.parseClass)(glob, i);
+	                if (consumed) {
+	                    re += src;
+	                    uflag = uflag || needUflag;
+	                    i += consumed - 1;
+	                    hasMagic = hasMagic || magic;
+	                    continue;
+	                }
+	            }
+	            if (c === '?') {
+	                re += qmark;
+	                hasMagic = true;
+	                continue;
+	            }
+	            re += regExpEscape(c);
+	        }
+	        return [re, (0, unescape_js_1.unescape)(glob), !!hasMagic, uflag];
 	    }
-
-	    // didn't get any hits.  this is success if it's a negative
-	    // pattern, failure otherwise.
-	    if (options.flipNegate) return false
-	    return this.negate
-	  }
-
-	  static defaults (def) {
-	    return minimatch.defaults(def).Minimatch
-	  }
 	}
+	ast.AST = AST;
+	_a = AST;
+	
+	return ast;
+}
 
-	minimatch.Minimatch = Minimatch;
-	return minimatch_1;
+var _escape = {};
+
+var hasRequired_escape;
+
+function require_escape () {
+	if (hasRequired_escape) return _escape;
+	hasRequired_escape = 1;
+	Object.defineProperty(_escape, "__esModule", { value: true });
+	_escape.escape = void 0;
+	/**
+	 * Escape all magic characters in a glob pattern.
+	 *
+	 * If the {@link MinimatchOptions.windowsPathsNoEscape}
+	 * option is used, then characters are escaped by wrapping in `[]`, because
+	 * a magic character wrapped in a character class can only be satisfied by
+	 * that exact character.  In this mode, `\` is _not_ escaped, because it is
+	 * not interpreted as a magic character, but instead as a path separator.
+	 *
+	 * If the {@link MinimatchOptions.magicalBraces} option is used,
+	 * then braces (`{` and `}`) will be escaped.
+	 */
+	const escape = (s, { windowsPathsNoEscape = false, magicalBraces = false, } = {}) => {
+	    // don't need to escape +@! because we escape the parens
+	    // that make those magic, and escaping ! as [!] isn't valid,
+	    // because [!]] is a valid glob class meaning not ']'.
+	    if (magicalBraces) {
+	        return windowsPathsNoEscape ?
+	            s.replace(/[?*()[\]{}]/g, '[$&]')
+	            : s.replace(/[?*()[\]\\{}]/g, '\\$&');
+	    }
+	    return windowsPathsNoEscape ?
+	        s.replace(/[?*()[\]]/g, '[$&]')
+	        : s.replace(/[?*()[\]\\]/g, '\\$&');
+	};
+	_escape.escape = escape;
+	
+	return _escape;
+}
+
+var hasRequiredCommonjs;
+
+function requireCommonjs () {
+	if (hasRequiredCommonjs) return commonjs$2;
+	hasRequiredCommonjs = 1;
+	(function (exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.unescape = exports.escape = exports.AST = exports.Minimatch = exports.match = exports.makeRe = exports.braceExpand = exports.defaults = exports.filter = exports.GLOBSTAR = exports.sep = exports.minimatch = void 0;
+		const brace_expansion_1 = requireCommonjs$1();
+		const assert_valid_pattern_js_1 = requireAssertValidPattern();
+		const ast_js_1 = requireAst();
+		const escape_js_1 = require_escape();
+		const unescape_js_1 = require_unescape();
+		const minimatch = (p, pattern, options = {}) => {
+		    (0, assert_valid_pattern_js_1.assertValidPattern)(pattern);
+		    // shortcut: comments match nothing.
+		    if (!options.nocomment && pattern.charAt(0) === '#') {
+		        return false;
+		    }
+		    return new Minimatch(pattern, options).match(p);
+		};
+		exports.minimatch = minimatch;
+		// Optimized checking for the most common glob patterns.
+		const starDotExtRE = /^\*+([^+@!?*[(]*)$/;
+		const starDotExtTest = (ext) => (f) => !f.startsWith('.') && f.endsWith(ext);
+		const starDotExtTestDot = (ext) => (f) => f.endsWith(ext);
+		const starDotExtTestNocase = (ext) => {
+		    ext = ext.toLowerCase();
+		    return (f) => !f.startsWith('.') && f.toLowerCase().endsWith(ext);
+		};
+		const starDotExtTestNocaseDot = (ext) => {
+		    ext = ext.toLowerCase();
+		    return (f) => f.toLowerCase().endsWith(ext);
+		};
+		const starDotStarRE = /^\*+\.\*+$/;
+		const starDotStarTest = (f) => !f.startsWith('.') && f.includes('.');
+		const starDotStarTestDot = (f) => f !== '.' && f !== '..' && f.includes('.');
+		const dotStarRE = /^\.\*+$/;
+		const dotStarTest = (f) => f !== '.' && f !== '..' && f.startsWith('.');
+		const starRE = /^\*+$/;
+		const starTest = (f) => f.length !== 0 && !f.startsWith('.');
+		const starTestDot = (f) => f.length !== 0 && f !== '.' && f !== '..';
+		const qmarksRE = /^\?+([^+@!?*[(]*)?$/;
+		const qmarksTestNocase = ([$0, ext = '']) => {
+		    const noext = qmarksTestNoExt([$0]);
+		    if (!ext)
+		        return noext;
+		    ext = ext.toLowerCase();
+		    return (f) => noext(f) && f.toLowerCase().endsWith(ext);
+		};
+		const qmarksTestNocaseDot = ([$0, ext = '']) => {
+		    const noext = qmarksTestNoExtDot([$0]);
+		    if (!ext)
+		        return noext;
+		    ext = ext.toLowerCase();
+		    return (f) => noext(f) && f.toLowerCase().endsWith(ext);
+		};
+		const qmarksTestDot = ([$0, ext = '']) => {
+		    const noext = qmarksTestNoExtDot([$0]);
+		    return !ext ? noext : (f) => noext(f) && f.endsWith(ext);
+		};
+		const qmarksTest = ([$0, ext = '']) => {
+		    const noext = qmarksTestNoExt([$0]);
+		    return !ext ? noext : (f) => noext(f) && f.endsWith(ext);
+		};
+		const qmarksTestNoExt = ([$0]) => {
+		    const len = $0.length;
+		    return (f) => f.length === len && !f.startsWith('.');
+		};
+		const qmarksTestNoExtDot = ([$0]) => {
+		    const len = $0.length;
+		    return (f) => f.length === len && f !== '.' && f !== '..';
+		};
+		/* c8 ignore start */
+		const defaultPlatform = (typeof process === 'object' && process ?
+		    (typeof process.env === 'object' &&
+		        process.env &&
+		        process.env.__MINIMATCH_TESTING_PLATFORM__) ||
+		        process.platform
+		    : 'posix');
+		const path = {
+		    win32: { sep: '\\' },
+		    posix: { sep: '/' },
+		};
+		/* c8 ignore stop */
+		exports.sep = defaultPlatform === 'win32' ? path.win32.sep : path.posix.sep;
+		exports.minimatch.sep = exports.sep;
+		exports.GLOBSTAR = Symbol('globstar **');
+		exports.minimatch.GLOBSTAR = exports.GLOBSTAR;
+		// any single thing other than /
+		// don't need to escape / when using new RegExp()
+		const qmark = '[^/]';
+		// * => any number of characters
+		const star = qmark + '*?';
+		// ** when dots are allowed.  Anything goes, except .. and .
+		// not (^ or / followed by one or two dots followed by $ or /),
+		// followed by anything, any number of times.
+		const twoStarDot = '(?:(?!(?:\\/|^)(?:\\.{1,2})($|\\/)).)*?';
+		// not a ^ or / followed by a dot,
+		// followed by anything, any number of times.
+		const twoStarNoDot = '(?:(?!(?:\\/|^)\\.).)*?';
+		const filter = (pattern, options = {}) => (p) => (0, exports.minimatch)(p, pattern, options);
+		exports.filter = filter;
+		exports.minimatch.filter = exports.filter;
+		const ext = (a, b = {}) => Object.assign({}, a, b);
+		const defaults = (def) => {
+		    if (!def || typeof def !== 'object' || !Object.keys(def).length) {
+		        return exports.minimatch;
+		    }
+		    const orig = exports.minimatch;
+		    const m = (p, pattern, options = {}) => orig(p, pattern, ext(def, options));
+		    return Object.assign(m, {
+		        Minimatch: class Minimatch extends orig.Minimatch {
+		            constructor(pattern, options = {}) {
+		                super(pattern, ext(def, options));
+		            }
+		            static defaults(options) {
+		                return orig.defaults(ext(def, options)).Minimatch;
+		            }
+		        },
+		        AST: class AST extends orig.AST {
+		            /* c8 ignore start */
+		            constructor(type, parent, options = {}) {
+		                super(type, parent, ext(def, options));
+		            }
+		            /* c8 ignore stop */
+		            static fromGlob(pattern, options = {}) {
+		                return orig.AST.fromGlob(pattern, ext(def, options));
+		            }
+		        },
+		        unescape: (s, options = {}) => orig.unescape(s, ext(def, options)),
+		        escape: (s, options = {}) => orig.escape(s, ext(def, options)),
+		        filter: (pattern, options = {}) => orig.filter(pattern, ext(def, options)),
+		        defaults: (options) => orig.defaults(ext(def, options)),
+		        makeRe: (pattern, options = {}) => orig.makeRe(pattern, ext(def, options)),
+		        braceExpand: (pattern, options = {}) => orig.braceExpand(pattern, ext(def, options)),
+		        match: (list, pattern, options = {}) => orig.match(list, pattern, ext(def, options)),
+		        sep: orig.sep,
+		        GLOBSTAR: exports.GLOBSTAR,
+		    });
+		};
+		exports.defaults = defaults;
+		exports.minimatch.defaults = exports.defaults;
+		// Brace expansion:
+		// a{b,c}d -> abd acd
+		// a{b,}c -> abc ac
+		// a{0..3}d -> a0d a1d a2d a3d
+		// a{b,c{d,e}f}g -> abg acdfg acefg
+		// a{b,c}d{e,f}g -> abdeg acdeg abdeg abdfg
+		//
+		// Invalid sets are not expanded.
+		// a{2..}b -> a{2..}b
+		// a{b}c -> a{b}c
+		const braceExpand = (pattern, options = {}) => {
+		    (0, assert_valid_pattern_js_1.assertValidPattern)(pattern);
+		    // Thanks to Yeting Li <https://github.com/yetingli> for
+		    // improving this regexp to avoid a ReDOS vulnerability.
+		    if (options.nobrace || !/\{(?:(?!\{).)*\}/.test(pattern)) {
+		        // shortcut. no need to expand.
+		        return [pattern];
+		    }
+		    return (0, brace_expansion_1.expand)(pattern, { max: options.braceExpandMax });
+		};
+		exports.braceExpand = braceExpand;
+		exports.minimatch.braceExpand = exports.braceExpand;
+		// parse a component of the expanded set.
+		// At this point, no pattern may contain "/" in it
+		// so we're going to return a 2d array, where each entry is the full
+		// pattern, split on '/', and then turned into a regular expression.
+		// A regexp is made at the end which joins each array with an
+		// escaped /, and another full one which joins each regexp with |.
+		//
+		// Following the lead of Bash 4.1, note that "**" only has special meaning
+		// when it is the *only* thing in a path portion.  Otherwise, any series
+		// of * is equivalent to a single *.  Globstar behavior is enabled by
+		// default, and can be disabled by setting options.noglobstar.
+		const makeRe = (pattern, options = {}) => new Minimatch(pattern, options).makeRe();
+		exports.makeRe = makeRe;
+		exports.minimatch.makeRe = exports.makeRe;
+		const match = (list, pattern, options = {}) => {
+		    const mm = new Minimatch(pattern, options);
+		    list = list.filter(f => mm.match(f));
+		    if (mm.options.nonull && !list.length) {
+		        list.push(pattern);
+		    }
+		    return list;
+		};
+		exports.match = match;
+		exports.minimatch.match = exports.match;
+		// replace stuff like \* with *
+		const globMagic = /[?*]|[+@!]\(.*?\)|\[|\]/;
+		const regExpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+		class Minimatch {
+		    options;
+		    set;
+		    pattern;
+		    windowsPathsNoEscape;
+		    nonegate;
+		    negate;
+		    comment;
+		    empty;
+		    preserveMultipleSlashes;
+		    partial;
+		    globSet;
+		    globParts;
+		    nocase;
+		    isWindows;
+		    platform;
+		    windowsNoMagicRoot;
+		    maxGlobstarRecursion;
+		    regexp;
+		    constructor(pattern, options = {}) {
+		        (0, assert_valid_pattern_js_1.assertValidPattern)(pattern);
+		        options = options || {};
+		        this.options = options;
+		        this.maxGlobstarRecursion = options.maxGlobstarRecursion ?? 200;
+		        this.pattern = pattern;
+		        this.platform = options.platform || defaultPlatform;
+		        this.isWindows = this.platform === 'win32';
+		        // avoid the annoying deprecation flag lol
+		        const awe = ('allowWindow' + 'sEscape');
+		        this.windowsPathsNoEscape =
+		            !!options.windowsPathsNoEscape || options[awe] === false;
+		        if (this.windowsPathsNoEscape) {
+		            this.pattern = this.pattern.replace(/\\/g, '/');
+		        }
+		        this.preserveMultipleSlashes = !!options.preserveMultipleSlashes;
+		        this.regexp = null;
+		        this.negate = false;
+		        this.nonegate = !!options.nonegate;
+		        this.comment = false;
+		        this.empty = false;
+		        this.partial = !!options.partial;
+		        this.nocase = !!this.options.nocase;
+		        this.windowsNoMagicRoot =
+		            options.windowsNoMagicRoot !== undefined ?
+		                options.windowsNoMagicRoot
+		                : !!(this.isWindows && this.nocase);
+		        this.globSet = [];
+		        this.globParts = [];
+		        this.set = [];
+		        // make the set of regexps etc.
+		        this.make();
+		    }
+		    hasMagic() {
+		        if (this.options.magicalBraces && this.set.length > 1) {
+		            return true;
+		        }
+		        for (const pattern of this.set) {
+		            for (const part of pattern) {
+		                if (typeof part !== 'string')
+		                    return true;
+		            }
+		        }
+		        return false;
+		    }
+		    debug(..._) { }
+		    make() {
+		        const pattern = this.pattern;
+		        const options = this.options;
+		        // empty patterns and comments match nothing.
+		        if (!options.nocomment && pattern.charAt(0) === '#') {
+		            this.comment = true;
+		            return;
+		        }
+		        if (!pattern) {
+		            this.empty = true;
+		            return;
+		        }
+		        // step 1: figure out negation, etc.
+		        this.parseNegate();
+		        // step 2: expand braces
+		        this.globSet = [...new Set(this.braceExpand())];
+		        if (options.debug) {
+		            //oxlint-disable-next-line no-console
+		            this.debug = (...args) => console.error(...args);
+		        }
+		        this.debug(this.pattern, this.globSet);
+		        // step 3: now we have a set, so turn each one into a series of
+		        // path-portion matching patterns.
+		        // These will be regexps, except in the case of "**", which is
+		        // set to the GLOBSTAR object for globstar behavior,
+		        // and will not contain any / characters
+		        //
+		        // First, we preprocess to make the glob pattern sets a bit simpler
+		        // and deduped.  There are some perf-killing patterns that can cause
+		        // problems with a glob walk, but we can simplify them down a bit.
+		        const rawGlobParts = this.globSet.map(s => this.slashSplit(s));
+		        this.globParts = this.preprocess(rawGlobParts);
+		        this.debug(this.pattern, this.globParts);
+		        // glob --> regexps
+		        let set = this.globParts.map((s, _, __) => {
+		            if (this.isWindows && this.windowsNoMagicRoot) {
+		                // check if it's a drive or unc path.
+		                const isUNC = s[0] === '' &&
+		                    s[1] === '' &&
+		                    (s[2] === '?' || !globMagic.test(s[2])) &&
+		                    !globMagic.test(s[3]);
+		                const isDrive = /^[a-z]:/i.test(s[0]);
+		                if (isUNC) {
+		                    return [
+		                        ...s.slice(0, 4),
+		                        ...s.slice(4).map(ss => this.parse(ss)),
+		                    ];
+		                }
+		                else if (isDrive) {
+		                    return [s[0], ...s.slice(1).map(ss => this.parse(ss))];
+		                }
+		            }
+		            return s.map(ss => this.parse(ss));
+		        });
+		        this.debug(this.pattern, set);
+		        // filter out everything that didn't compile properly.
+		        this.set = set.filter(s => s.indexOf(false) === -1);
+		        // do not treat the ? in UNC paths as magic
+		        if (this.isWindows) {
+		            for (let i = 0; i < this.set.length; i++) {
+		                const p = this.set[i];
+		                if (p[0] === '' &&
+		                    p[1] === '' &&
+		                    this.globParts[i][2] === '?' &&
+		                    typeof p[3] === 'string' &&
+		                    /^[a-z]:$/i.test(p[3])) {
+		                    p[2] = '?';
+		                }
+		            }
+		        }
+		        this.debug(this.pattern, this.set);
+		    }
+		    // various transforms to equivalent pattern sets that are
+		    // faster to process in a filesystem walk.  The goal is to
+		    // eliminate what we can, and push all ** patterns as far
+		    // to the right as possible, even if it increases the number
+		    // of patterns that we have to process.
+		    preprocess(globParts) {
+		        // if we're not in globstar mode, then turn ** into *
+		        if (this.options.noglobstar) {
+		            for (const partset of globParts) {
+		                for (let j = 0; j < partset.length; j++) {
+		                    if (partset[j] === '**') {
+		                        partset[j] = '*';
+		                    }
+		                }
+		            }
+		        }
+		        const { optimizationLevel = 1 } = this.options;
+		        if (optimizationLevel >= 2) {
+		            // aggressive optimization for the purpose of fs walking
+		            globParts = this.firstPhasePreProcess(globParts);
+		            globParts = this.secondPhasePreProcess(globParts);
+		        }
+		        else if (optimizationLevel >= 1) {
+		            // just basic optimizations to remove some .. parts
+		            globParts = this.levelOneOptimize(globParts);
+		        }
+		        else {
+		            // just collapse multiple ** portions into one
+		            globParts = this.adjascentGlobstarOptimize(globParts);
+		        }
+		        return globParts;
+		    }
+		    // just get rid of adjascent ** portions
+		    adjascentGlobstarOptimize(globParts) {
+		        return globParts.map(parts => {
+		            let gs = -1;
+		            while (-1 !== (gs = parts.indexOf('**', gs + 1))) {
+		                let i = gs;
+		                while (parts[i + 1] === '**') {
+		                    i++;
+		                }
+		                if (i !== gs) {
+		                    parts.splice(gs, i - gs);
+		                }
+		            }
+		            return parts;
+		        });
+		    }
+		    // get rid of adjascent ** and resolve .. portions
+		    levelOneOptimize(globParts) {
+		        return globParts.map(parts => {
+		            parts = parts.reduce((set, part) => {
+		                const prev = set[set.length - 1];
+		                if (part === '**' && prev === '**') {
+		                    return set;
+		                }
+		                if (part === '..') {
+		                    if (prev && prev !== '..' && prev !== '.' && prev !== '**') {
+		                        set.pop();
+		                        return set;
+		                    }
+		                }
+		                set.push(part);
+		                return set;
+		            }, []);
+		            return parts.length === 0 ? [''] : parts;
+		        });
+		    }
+		    levelTwoFileOptimize(parts) {
+		        if (!Array.isArray(parts)) {
+		            parts = this.slashSplit(parts);
+		        }
+		        let didSomething = false;
+		        do {
+		            didSomething = false;
+		            // <pre>/<e>/<rest> -> <pre>/<rest>
+		            if (!this.preserveMultipleSlashes) {
+		                for (let i = 1; i < parts.length - 1; i++) {
+		                    const p = parts[i];
+		                    // don't squeeze out UNC patterns
+		                    if (i === 1 && p === '' && parts[0] === '')
+		                        continue;
+		                    if (p === '.' || p === '') {
+		                        didSomething = true;
+		                        parts.splice(i, 1);
+		                        i--;
+		                    }
+		                }
+		                if (parts[0] === '.' &&
+		                    parts.length === 2 &&
+		                    (parts[1] === '.' || parts[1] === '')) {
+		                    didSomething = true;
+		                    parts.pop();
+		                }
+		            }
+		            // <pre>/<p>/../<rest> -> <pre>/<rest>
+		            let dd = 0;
+		            while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
+		                const p = parts[dd - 1];
+		                if (p &&
+		                    p !== '.' &&
+		                    p !== '..' &&
+		                    p !== '**' &&
+		                    !(this.isWindows && /^[a-z]:$/i.test(p))) {
+		                    didSomething = true;
+		                    parts.splice(dd - 1, 2);
+		                    dd -= 2;
+		                }
+		            }
+		        } while (didSomething);
+		        return parts.length === 0 ? [''] : parts;
+		    }
+		    // First phase: single-pattern processing
+		    // <pre> is 1 or more portions
+		    // <rest> is 1 or more portions
+		    // <p> is any portion other than ., .., '', or **
+		    // <e> is . or ''
+		    //
+		    // **/.. is *brutal* for filesystem walking performance, because
+		    // it effectively resets the recursive walk each time it occurs,
+		    // and ** cannot be reduced out by a .. pattern part like a regexp
+		    // or most strings (other than .., ., and '') can be.
+		    //
+		    // <pre>/**/../<p>/<p>/<rest> -> {<pre>/../<p>/<p>/<rest>,<pre>/**/<p>/<p>/<rest>}
+		    // <pre>/<e>/<rest> -> <pre>/<rest>
+		    // <pre>/<p>/../<rest> -> <pre>/<rest>
+		    // **/**/<rest> -> **/<rest>
+		    //
+		    // **/*/<rest> -> */**/<rest> <== not valid because ** doesn't follow
+		    // this WOULD be allowed if ** did follow symlinks, or * didn't
+		    firstPhasePreProcess(globParts) {
+		        let didSomething = false;
+		        do {
+		            didSomething = false;
+		            // <pre>/**/../<p>/<p>/<rest> -> {<pre>/../<p>/<p>/<rest>,<pre>/**/<p>/<p>/<rest>}
+		            for (let parts of globParts) {
+		                let gs = -1;
+		                while (-1 !== (gs = parts.indexOf('**', gs + 1))) {
+		                    let gss = gs;
+		                    while (parts[gss + 1] === '**') {
+		                        // <pre>/**/**/<rest> -> <pre>/**/<rest>
+		                        gss++;
+		                    }
+		                    // eg, if gs is 2 and gss is 4, that means we have 3 **
+		                    // parts, and can remove 2 of them.
+		                    if (gss > gs) {
+		                        parts.splice(gs + 1, gss - gs);
+		                    }
+		                    let next = parts[gs + 1];
+		                    const p = parts[gs + 2];
+		                    const p2 = parts[gs + 3];
+		                    if (next !== '..')
+		                        continue;
+		                    if (!p ||
+		                        p === '.' ||
+		                        p === '..' ||
+		                        !p2 ||
+		                        p2 === '.' ||
+		                        p2 === '..') {
+		                        continue;
+		                    }
+		                    didSomething = true;
+		                    // edit parts in place, and push the new one
+		                    parts.splice(gs, 1);
+		                    const other = parts.slice(0);
+		                    other[gs] = '**';
+		                    globParts.push(other);
+		                    gs--;
+		                }
+		                // <pre>/<e>/<rest> -> <pre>/<rest>
+		                if (!this.preserveMultipleSlashes) {
+		                    for (let i = 1; i < parts.length - 1; i++) {
+		                        const p = parts[i];
+		                        // don't squeeze out UNC patterns
+		                        if (i === 1 && p === '' && parts[0] === '')
+		                            continue;
+		                        if (p === '.' || p === '') {
+		                            didSomething = true;
+		                            parts.splice(i, 1);
+		                            i--;
+		                        }
+		                    }
+		                    if (parts[0] === '.' &&
+		                        parts.length === 2 &&
+		                        (parts[1] === '.' || parts[1] === '')) {
+		                        didSomething = true;
+		                        parts.pop();
+		                    }
+		                }
+		                // <pre>/<p>/../<rest> -> <pre>/<rest>
+		                let dd = 0;
+		                while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
+		                    const p = parts[dd - 1];
+		                    if (p && p !== '.' && p !== '..' && p !== '**') {
+		                        didSomething = true;
+		                        const needDot = dd === 1 && parts[dd + 1] === '**';
+		                        const splin = needDot ? ['.'] : [];
+		                        parts.splice(dd - 1, 2, ...splin);
+		                        if (parts.length === 0)
+		                            parts.push('');
+		                        dd -= 2;
+		                    }
+		                }
+		            }
+		        } while (didSomething);
+		        return globParts;
+		    }
+		    // second phase: multi-pattern dedupes
+		    // {<pre>/*/<rest>,<pre>/<p>/<rest>} -> <pre>/*/<rest>
+		    // {<pre>/<rest>,<pre>/<rest>} -> <pre>/<rest>
+		    // {<pre>/**/<rest>,<pre>/<rest>} -> <pre>/**/<rest>
+		    //
+		    // {<pre>/**/<rest>,<pre>/**/<p>/<rest>} -> <pre>/**/<rest>
+		    // ^-- not valid because ** doens't follow symlinks
+		    secondPhasePreProcess(globParts) {
+		        for (let i = 0; i < globParts.length - 1; i++) {
+		            for (let j = i + 1; j < globParts.length; j++) {
+		                const matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
+		                if (matched) {
+		                    globParts[i] = [];
+		                    globParts[j] = matched;
+		                    break;
+		                }
+		            }
+		        }
+		        return globParts.filter(gs => gs.length);
+		    }
+		    partsMatch(a, b, emptyGSMatch = false) {
+		        let ai = 0;
+		        let bi = 0;
+		        let result = [];
+		        let which = '';
+		        while (ai < a.length && bi < b.length) {
+		            if (a[ai] === b[bi]) {
+		                result.push(which === 'b' ? b[bi] : a[ai]);
+		                ai++;
+		                bi++;
+		            }
+		            else if (emptyGSMatch && a[ai] === '**' && b[bi] === a[ai + 1]) {
+		                result.push(a[ai]);
+		                ai++;
+		            }
+		            else if (emptyGSMatch && b[bi] === '**' && a[ai] === b[bi + 1]) {
+		                result.push(b[bi]);
+		                bi++;
+		            }
+		            else if (a[ai] === '*' &&
+		                b[bi] &&
+		                (this.options.dot || !b[bi].startsWith('.')) &&
+		                b[bi] !== '**') {
+		                if (which === 'b')
+		                    return false;
+		                which = 'a';
+		                result.push(a[ai]);
+		                ai++;
+		                bi++;
+		            }
+		            else if (b[bi] === '*' &&
+		                a[ai] &&
+		                (this.options.dot || !a[ai].startsWith('.')) &&
+		                a[ai] !== '**') {
+		                if (which === 'a')
+		                    return false;
+		                which = 'b';
+		                result.push(b[bi]);
+		                ai++;
+		                bi++;
+		            }
+		            else {
+		                return false;
+		            }
+		        }
+		        // if we fall out of the loop, it means they two are identical
+		        // as long as their lengths match
+		        return a.length === b.length && result;
+		    }
+		    parseNegate() {
+		        if (this.nonegate)
+		            return;
+		        const pattern = this.pattern;
+		        let negate = false;
+		        let negateOffset = 0;
+		        for (let i = 0; i < pattern.length && pattern.charAt(i) === '!'; i++) {
+		            negate = !negate;
+		            negateOffset++;
+		        }
+		        if (negateOffset)
+		            this.pattern = pattern.slice(negateOffset);
+		        this.negate = negate;
+		    }
+		    // set partial to true to test if, for example,
+		    // "/a/b" matches the start of "/*/b/*/d"
+		    // Partial means, if you run out of file before you run
+		    // out of pattern, then that's fine, as long as all
+		    // the parts match.
+		    matchOne(file, pattern, partial = false) {
+		        let fileStartIndex = 0;
+		        let patternStartIndex = 0;
+		        // UNC paths like //?/X:/... can match X:/... and vice versa
+		        // Drive letters in absolute drive or unc paths are always compared
+		        // case-insensitively.
+		        if (this.isWindows) {
+		            const fileDrive = typeof file[0] === 'string' && /^[a-z]:$/i.test(file[0]);
+		            const fileUNC = !fileDrive &&
+		                file[0] === '' &&
+		                file[1] === '' &&
+		                file[2] === '?' &&
+		                /^[a-z]:$/i.test(file[3]);
+		            const patternDrive = typeof pattern[0] === 'string' && /^[a-z]:$/i.test(pattern[0]);
+		            const patternUNC = !patternDrive &&
+		                pattern[0] === '' &&
+		                pattern[1] === '' &&
+		                pattern[2] === '?' &&
+		                typeof pattern[3] === 'string' &&
+		                /^[a-z]:$/i.test(pattern[3]);
+		            const fdi = fileUNC ? 3
+		                : fileDrive ? 0
+		                    : undefined;
+		            const pdi = patternUNC ? 3
+		                : patternDrive ? 0
+		                    : undefined;
+		            if (typeof fdi === 'number' && typeof pdi === 'number') {
+		                const [fd, pd] = [
+		                    file[fdi],
+		                    pattern[pdi],
+		                ];
+		                // start matching at the drive letter index of each
+		                if (fd.toLowerCase() === pd.toLowerCase()) {
+		                    pattern[pdi] = fd;
+		                    patternStartIndex = pdi;
+		                    fileStartIndex = fdi;
+		                }
+		            }
+		        }
+		        // resolve and reduce . and .. portions in the file as well.
+		        // don't need to do the second phase, because it's only one string[]
+		        const { optimizationLevel = 1 } = this.options;
+		        if (optimizationLevel >= 2) {
+		            file = this.levelTwoFileOptimize(file);
+		        }
+		        if (pattern.includes(exports.GLOBSTAR)) {
+		            return this.#matchGlobstar(file, pattern, partial, fileStartIndex, patternStartIndex);
+		        }
+		        return this.#matchOne(file, pattern, partial, fileStartIndex, patternStartIndex);
+		    }
+		    #matchGlobstar(file, pattern, partial, fileIndex, patternIndex) {
+		        // split the pattern into head, tail, and middle of ** delimited parts
+		        const firstgs = pattern.indexOf(exports.GLOBSTAR, patternIndex);
+		        const lastgs = pattern.lastIndexOf(exports.GLOBSTAR);
+		        // split the pattern up into globstar-delimited sections
+		        // the tail has to be at the end, and the others just have
+		        // to be found in order from the head.
+		        const [head, body, tail] = partial ?
+		            [
+		                pattern.slice(patternIndex, firstgs),
+		                pattern.slice(firstgs + 1),
+		                [],
+		            ]
+		            : [
+		                pattern.slice(patternIndex, firstgs),
+		                pattern.slice(firstgs + 1, lastgs),
+		                pattern.slice(lastgs + 1),
+		            ];
+		        // check the head, from the current file/pattern index.
+		        if (head.length) {
+		            const fileHead = file.slice(fileIndex, fileIndex + head.length);
+		            if (!this.#matchOne(fileHead, head, partial, 0, 0)) {
+		                return false;
+		            }
+		            fileIndex += head.length;
+		            patternIndex += head.length;
+		        }
+		        // now we know the head matches!
+		        // if the last portion is not empty, it MUST match the end
+		        // check the tail
+		        let fileTailMatch = 0;
+		        if (tail.length) {
+		            // if head + tail > file, then we cannot possibly match
+		            if (tail.length + fileIndex > file.length)
+		                return false;
+		            // try to match the tail
+		            let tailStart = file.length - tail.length;
+		            if (this.#matchOne(file, tail, partial, tailStart, 0)) {
+		                fileTailMatch = tail.length;
+		            }
+		            else {
+		                // affordance for stuff like a/**/* matching a/b/
+		                // if the last file portion is '', and there's more to the pattern
+		                // then try without the '' bit.
+		                if (file[file.length - 1] !== '' ||
+		                    fileIndex + tail.length === file.length) {
+		                    return false;
+		                }
+		                tailStart--;
+		                if (!this.#matchOne(file, tail, partial, tailStart, 0)) {
+		                    return false;
+		                }
+		                fileTailMatch = tail.length + 1;
+		            }
+		        }
+		        // now we know the tail matches!
+		        // the middle is zero or more portions wrapped in **, possibly
+		        // containing more ** sections.
+		        // so a/**/b/**/c/**/d has become **/b/**/c/**
+		        // if it's empty, it means a/**/b, just verify we have no bad dots
+		        // if there's no tail, so it ends on /**, then we must have *something*
+		        // after the head, or it's not a matc
+		        if (!body.length) {
+		            let sawSome = !!fileTailMatch;
+		            for (let i = fileIndex; i < file.length - fileTailMatch; i++) {
+		                const f = String(file[i]);
+		                sawSome = true;
+		                if (f === '.' ||
+		                    f === '..' ||
+		                    (!this.options.dot && f.startsWith('.'))) {
+		                    return false;
+		                }
+		            }
+		            // in partial mode, we just need to get past all file parts
+		            return partial || sawSome;
+		        }
+		        // now we know that there's one or more body sections, which can
+		        // be matched anywhere from the 0 index (because the head was pruned)
+		        // through to the length-fileTailMatch index.
+		        // split the body up into sections, and note the minimum index it can
+		        // be found at (start with the length of all previous segments)
+		        // [section, before, after]
+		        const bodySegments = [[[], 0]];
+		        let currentBody = bodySegments[0];
+		        let nonGsParts = 0;
+		        const nonGsPartsSums = [0];
+		        for (const b of body) {
+		            if (b === exports.GLOBSTAR) {
+		                nonGsPartsSums.push(nonGsParts);
+		                currentBody = [[], 0];
+		                bodySegments.push(currentBody);
+		            }
+		            else {
+		                currentBody[0].push(b);
+		                nonGsParts++;
+		            }
+		        }
+		        let i = bodySegments.length - 1;
+		        const fileLength = file.length - fileTailMatch;
+		        for (const b of bodySegments) {
+		            b[1] = fileLength - (nonGsPartsSums[i--] + b[0].length);
+		        }
+		        return !!this.#matchGlobStarBodySections(file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch);
+		    }
+		    // return false for "nope, not matching"
+		    // return null for "not matching, cannot keep trying"
+		    #matchGlobStarBodySections(file, 
+		    // pattern section, last possible position for it
+		    bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail) {
+		        // take the first body segment, and walk from fileIndex to its "after"
+		        // value at the end
+		        // If it doesn't match at that position, we increment, until we hit
+		        // that final possible position, and give up.
+		        // If it does match, then advance and try to rest.
+		        // If any of them fail we keep walking forward.
+		        // this is still a bit recursively painful, but it's more constrained
+		        // than previous implementations, because we never test something that
+		        // can't possibly be a valid matching condition.
+		        const bs = bodySegments[bodyIndex];
+		        if (!bs) {
+		            // just make sure that there's no bad dots
+		            for (let i = fileIndex; i < file.length; i++) {
+		                sawTail = true;
+		                const f = file[i];
+		                if (f === '.' ||
+		                    f === '..' ||
+		                    (!this.options.dot && f.startsWith('.'))) {
+		                    return false;
+		                }
+		            }
+		            return sawTail;
+		        }
+		        // have a non-globstar body section to test
+		        const [body, after] = bs;
+		        while (fileIndex <= after) {
+		            const m = this.#matchOne(file.slice(0, fileIndex + body.length), body, partial, fileIndex, 0);
+		            // if limit exceeded, no match. intentional false negative,
+		            // acceptable break in correctness for security.
+		            if (m && globStarDepth < this.maxGlobstarRecursion) {
+		                // match! see if the rest match. if so, we're done!
+		                const sub = this.#matchGlobStarBodySections(file, bodySegments, fileIndex + body.length, bodyIndex + 1, partial, globStarDepth + 1, sawTail);
+		                if (sub !== false) {
+		                    return sub;
+		                }
+		            }
+		            const f = file[fileIndex];
+		            if (f === '.' ||
+		                f === '..' ||
+		                (!this.options.dot && f.startsWith('.'))) {
+		                return false;
+		            }
+		            fileIndex++;
+		        }
+		        // walked off. no point continuing
+		        return partial || null;
+		    }
+		    #matchOne(file, pattern, partial, fileIndex, patternIndex) {
+		        let fi;
+		        let pi;
+		        let pl;
+		        let fl;
+		        for (fi = fileIndex,
+		            pi = patternIndex,
+		            fl = file.length,
+		            pl = pattern.length; fi < fl && pi < pl; fi++, pi++) {
+		            this.debug('matchOne loop');
+		            let p = pattern[pi];
+		            let f = file[fi];
+		            this.debug(pattern, p, f);
+		            // should be impossible.
+		            // some invalid regexp stuff in the set.
+		            /* c8 ignore start */
+		            if (p === false || p === exports.GLOBSTAR) {
+		                return false;
+		            }
+		            /* c8 ignore stop */
+		            // something other than **
+		            // non-magic patterns just have to match exactly
+		            // patterns with magic have been turned into regexps.
+		            let hit;
+		            if (typeof p === 'string') {
+		                hit = f === p;
+		                this.debug('string match', p, f, hit);
+		            }
+		            else {
+		                hit = p.test(f);
+		                this.debug('pattern match', p, f, hit);
+		            }
+		            if (!hit)
+		                return false;
+		        }
+		        // Note: ending in / means that we'll get a final ""
+		        // at the end of the pattern.  This can only match a
+		        // corresponding "" at the end of the file.
+		        // If the file ends in /, then it can only match a
+		        // a pattern that ends in /, unless the pattern just
+		        // doesn't have any more for it. But, a/b/ should *not*
+		        // match "a/b/*", even though "" matches against the
+		        // [^/]*? pattern, except in partial mode, where it might
+		        // simply not be reached yet.
+		        // However, a/b/ should still satisfy a/*
+		        // now either we fell off the end of the pattern, or we're done.
+		        if (fi === fl && pi === pl) {
+		            // ran out of pattern and filename at the same time.
+		            // an exact hit!
+		            return true;
+		        }
+		        else if (fi === fl) {
+		            // ran out of file, but still had pattern left.
+		            // this is ok if we're doing the match as part of
+		            // a glob fs traversal.
+		            return partial;
+		        }
+		        else if (pi === pl) {
+		            // ran out of pattern, still have file left.
+		            // this is only acceptable if we're on the very last
+		            // empty segment of a file with a trailing slash.
+		            // a/* should match a/b/
+		            return fi === fl - 1 && file[fi] === '';
+		            /* c8 ignore start */
+		        }
+		        else {
+		            // should be unreachable.
+		            throw new Error('wtf?');
+		        }
+		        /* c8 ignore stop */
+		    }
+		    braceExpand() {
+		        return (0, exports.braceExpand)(this.pattern, this.options);
+		    }
+		    parse(pattern) {
+		        (0, assert_valid_pattern_js_1.assertValidPattern)(pattern);
+		        const options = this.options;
+		        // shortcuts
+		        if (pattern === '**')
+		            return exports.GLOBSTAR;
+		        if (pattern === '')
+		            return '';
+		        // far and away, the most common glob pattern parts are
+		        // *, *.*, and *.<ext>  Add a fast check method for those.
+		        let m;
+		        let fastTest = null;
+		        if ((m = pattern.match(starRE))) {
+		            fastTest = options.dot ? starTestDot : starTest;
+		        }
+		        else if ((m = pattern.match(starDotExtRE))) {
+		            fastTest = (options.nocase ?
+		                options.dot ?
+		                    starDotExtTestNocaseDot
+		                    : starDotExtTestNocase
+		                : options.dot ? starDotExtTestDot
+		                    : starDotExtTest)(m[1]);
+		        }
+		        else if ((m = pattern.match(qmarksRE))) {
+		            fastTest = (options.nocase ?
+		                options.dot ?
+		                    qmarksTestNocaseDot
+		                    : qmarksTestNocase
+		                : options.dot ? qmarksTestDot
+		                    : qmarksTest)(m);
+		        }
+		        else if ((m = pattern.match(starDotStarRE))) {
+		            fastTest = options.dot ? starDotStarTestDot : starDotStarTest;
+		        }
+		        else if ((m = pattern.match(dotStarRE))) {
+		            fastTest = dotStarTest;
+		        }
+		        const re = ast_js_1.AST.fromGlob(pattern, this.options).toMMPattern();
+		        if (fastTest && typeof re === 'object') {
+		            // Avoids overriding in frozen environments
+		            Reflect.defineProperty(re, 'test', { value: fastTest });
+		        }
+		        return re;
+		    }
+		    makeRe() {
+		        if (this.regexp || this.regexp === false)
+		            return this.regexp;
+		        // at this point, this.set is a 2d array of partial
+		        // pattern strings, or "**".
+		        //
+		        // It's better to use .match().  This function shouldn't
+		        // be used, really, but it's pretty convenient sometimes,
+		        // when you just want to work with a regex.
+		        const set = this.set;
+		        if (!set.length) {
+		            this.regexp = false;
+		            return this.regexp;
+		        }
+		        const options = this.options;
+		        const twoStar = options.noglobstar ? star
+		            : options.dot ? twoStarDot
+		                : twoStarNoDot;
+		        const flags = new Set(options.nocase ? ['i'] : []);
+		        // regexpify non-globstar patterns
+		        // if ** is only item, then we just do one twoStar
+		        // if ** is first, and there are more, prepend (\/|twoStar\/)? to next
+		        // if ** is last, append (\/twoStar|) to previous
+		        // if ** is in the middle, append (\/|\/twoStar\/) to previous
+		        // then filter out GLOBSTAR symbols
+		        let re = set
+		            .map(pattern => {
+		            const pp = pattern.map(p => {
+		                if (p instanceof RegExp) {
+		                    for (const f of p.flags.split(''))
+		                        flags.add(f);
+		                }
+		                return (typeof p === 'string' ? regExpEscape(p)
+		                    : p === exports.GLOBSTAR ? exports.GLOBSTAR
+		                        : p._src);
+		            });
+		            pp.forEach((p, i) => {
+		                const next = pp[i + 1];
+		                const prev = pp[i - 1];
+		                if (p !== exports.GLOBSTAR || prev === exports.GLOBSTAR) {
+		                    return;
+		                }
+		                if (prev === undefined) {
+		                    if (next !== undefined && next !== exports.GLOBSTAR) {
+		                        pp[i + 1] = '(?:\\/|' + twoStar + '\\/)?' + next;
+		                    }
+		                    else {
+		                        pp[i] = twoStar;
+		                    }
+		                }
+		                else if (next === undefined) {
+		                    pp[i - 1] = prev + '(?:\\/|\\/' + twoStar + ')?';
+		                }
+		                else if (next !== exports.GLOBSTAR) {
+		                    pp[i - 1] = prev + '(?:\\/|\\/' + twoStar + '\\/)' + next;
+		                    pp[i + 1] = exports.GLOBSTAR;
+		                }
+		            });
+		            const filtered = pp.filter(p => p !== exports.GLOBSTAR);
+		            // For partial matches, we need to make the pattern match
+		            // any prefix of the full path. We do this by generating
+		            // alternative patterns that match progressively longer prefixes.
+		            if (this.partial && filtered.length >= 1) {
+		                const prefixes = [];
+		                for (let i = 1; i <= filtered.length; i++) {
+		                    prefixes.push(filtered.slice(0, i).join('/'));
+		                }
+		                return '(?:' + prefixes.join('|') + ')';
+		            }
+		            return filtered.join('/');
+		        })
+		            .join('|');
+		        // need to wrap in parens if we had more than one thing with |,
+		        // otherwise only the first will be anchored to ^ and the last to $
+		        const [open, close] = set.length > 1 ? ['(?:', ')'] : ['', ''];
+		        // must match entire pattern
+		        // ending in a * or ** will make it less strict.
+		        re = '^' + open + re + close + '$';
+		        // In partial mode, '/' should always match as it's a valid prefix for any pattern
+		        if (this.partial) {
+		            re = '^(?:\\/|' + open + re.slice(1, -1) + close + ')$';
+		        }
+		        // can match anything, as long as it's not this.
+		        if (this.negate)
+		            re = '^(?!' + re + ').+$';
+		        try {
+		            this.regexp = new RegExp(re, [...flags].join(''));
+		            /* c8 ignore start */
+		        }
+		        catch {
+		            // should be impossible
+		            this.regexp = false;
+		        }
+		        /* c8 ignore stop */
+		        return this.regexp;
+		    }
+		    slashSplit(p) {
+		        // if p starts with // on windows, we preserve that
+		        // so that UNC paths aren't broken.  Otherwise, any number of
+		        // / characters are coalesced into one, unless
+		        // preserveMultipleSlashes is set to true.
+		        if (this.preserveMultipleSlashes) {
+		            return p.split('/');
+		        }
+		        else if (this.isWindows && /^\/\/[^/]+/.test(p)) {
+		            // add an extra '' for the one we lose
+		            return ['', ...p.split(/\/+/)];
+		        }
+		        else {
+		            return p.split(/\/+/);
+		        }
+		    }
+		    match(f, partial = this.partial) {
+		        this.debug('match', f, this.pattern);
+		        // short-circuit in the case of busted things.
+		        // comments, etc.
+		        if (this.comment) {
+		            return false;
+		        }
+		        if (this.empty) {
+		            return f === '';
+		        }
+		        if (f === '/' && partial) {
+		            return true;
+		        }
+		        const options = this.options;
+		        // windows: need to use /, not \
+		        if (this.isWindows) {
+		            f = f.split('\\').join('/');
+		        }
+		        // treat the test path as a set of pathparts.
+		        const ff = this.slashSplit(f);
+		        this.debug(this.pattern, 'split', ff);
+		        // just ONE of the pattern sets in this.set needs to match
+		        // in order for it to be valid.  If negating, then just one
+		        // match means that we have failed.
+		        // Either way, return on the first hit.
+		        const set = this.set;
+		        this.debug(this.pattern, 'set', set);
+		        // Find the basename of the path by looking for the last non-empty segment
+		        let filename = ff[ff.length - 1];
+		        if (!filename) {
+		            for (let i = ff.length - 2; !filename && i >= 0; i--) {
+		                filename = ff[i];
+		            }
+		        }
+		        for (const pattern of set) {
+		            let file = ff;
+		            if (options.matchBase && pattern.length === 1) {
+		                file = [filename];
+		            }
+		            const hit = this.matchOne(file, pattern, partial);
+		            if (hit) {
+		                if (options.flipNegate) {
+		                    return true;
+		                }
+		                return !this.negate;
+		            }
+		        }
+		        // didn't get any hits.  this is success if it's a negative
+		        // pattern, failure otherwise.
+		        if (options.flipNegate) {
+		            return false;
+		        }
+		        return this.negate;
+		    }
+		    static defaults(def) {
+		        return exports.minimatch.defaults(def).Minimatch;
+		    }
+		}
+		exports.Minimatch = Minimatch;
+		/* c8 ignore start */
+		var ast_js_2 = requireAst();
+		Object.defineProperty(exports, "AST", { enumerable: true, get: function () { return ast_js_2.AST; } });
+		var escape_js_2 = require_escape();
+		Object.defineProperty(exports, "escape", { enumerable: true, get: function () { return escape_js_2.escape; } });
+		var unescape_js_2 = require_unescape();
+		Object.defineProperty(exports, "unescape", { enumerable: true, get: function () { return unescape_js_2.unescape; } });
+		/* c8 ignore stop */
+		exports.minimatch.AST = ast_js_1.AST;
+		exports.minimatch.Minimatch = Minimatch;
+		exports.minimatch.escape = escape_js_1.escape;
+		exports.minimatch.unescape = unescape_js_1.unescape;
+		
+	} (commonjs$2));
+	return commonjs$2;
 }
 
 var readdirGlob_1;
@@ -90486,8 +91219,8 @@ function requireReaddirGlob () {
 	readdirGlob_1 = readdirGlob;
 
 	const fs = fs__default;
-	const { EventEmitter } = require$$1;
-	const { Minimatch } = requireMinimatch();
+	const { EventEmitter } = require$$1$1;
+	const { Minimatch } = requireCommonjs();
 	const { resolve } = path__default;
 
 	function readdir(dir, strict) {
@@ -99406,7 +100139,7 @@ function require_stream_readable () {
 	Readable.ReadableState = ReadableState;
 
 	/*<replacement>*/
-	require$$1.EventEmitter;
+	require$$1$1.EventEmitter;
 
 	var EElistenerCount = function (emitter, type) {
 	  return emitter.listeners(type).length;
@@ -103993,7 +104726,7 @@ function requireUtil$2 () {
 		    return fn
 		  },
 		  addAbortListener:
-		    require$$1.addAbortListener ||
+		    require$$1$1.addAbortListener ||
 		    function addAbortListener(signal, listener) {
 		      if (signal === undefined) {
 		        throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal)
@@ -105539,7 +106272,7 @@ function requireLegacy () {
 	hasRequiredLegacy = 1;
 
 	const { ArrayIsArray, ObjectSetPrototypeOf } = requirePrimordials();
-	const { EventEmitter: EE } = require$$1;
+	const { EventEmitter: EE } = require$$1$1;
 	function Stream(opts) {
 	  EE.call(this, opts);
 	}
@@ -106399,7 +107132,7 @@ function requireReadable () {
 	} = requirePrimordials();
 	readable = Readable;
 	Readable.ReadableState = ReadableState;
-	const { EventEmitter: EE } = require$$1;
+	const { EventEmitter: EE } = require$$1$1;
 	const { Stream, prependListener } = requireLegacy();
 	const { Buffer } = require$$0$6;
 	const { addAbortSignal } = requireAddAbortSignal();
@@ -107673,7 +108406,7 @@ function requireWritable () {
 	} = requirePrimordials();
 	writable = Writable;
 	Writable.WritableState = WritableState;
-	const { EventEmitter: EE } = require$$1;
+	const { EventEmitter: EE } = require$$1$1;
 	const Stream = requireLegacy().Stream;
 	const { Buffer } = require$$0$6;
 	const destroyImpl = requireDestroy();
@@ -115602,7 +116335,7 @@ var hasRequired_default;
 function require_default () {
 	if (hasRequired_default) return _default;
 	hasRequired_default = 1;
-	_default = require$$1;
+	_default = require$$1$1;
 	return _default;
 }
 
@@ -119561,7 +120294,7 @@ const mimeTypes$1 = {
  * Gets the MIME type for a file based on its extension
  */
 function getMimeType(filePath) {
-    const ext = path$1.extname(filePath).toLowerCase();
+    const ext = path.extname(filePath).toLowerCase();
     return mimeTypes$1[ext] || 'application/octet-stream';
 }
 
@@ -119587,7 +120320,7 @@ function uploadArtifact(name, files, rootDirectory, options) {
             if (!fs.existsSync(files[0])) {
                 throw new FilesNotFoundError(files);
             }
-            artifactFileName = path$1.basename(files[0]);
+            artifactFileName = path.basename(files[0]);
             name = artifactFileName;
         }
         validateArtifactName(name);
@@ -119867,7 +120600,7 @@ function requireLib$1 () {
 	lib$1.getProxyUrl = getProxyUrl;
 	lib$1.isHttps = isHttps;
 	const http = __importStar(http__default);
-	const https = __importStar(https__default);
+	const https = __importStar(require$$1__default);
 	const pm = __importStar(requireProxy$1());
 	const tunnel = __importStar(requireTunnel());
 	const undici_1 = requireUndici();
@@ -120812,6 +121545,684 @@ function requireBeforeAfterHook () {
 
 var beforeAfterHookExports = requireBeforeAfterHook();
 
+const VERSION$d = "9.0.6";
+
+const userAgent$1 = `octokit-endpoint.js/${VERSION$d} ${getUserAgent()}`;
+const DEFAULTS$1 = {
+  method: "GET",
+  baseUrl: "https://api.github.com",
+  headers: {
+    accept: "application/vnd.github.v3+json",
+    "user-agent": userAgent$1
+  },
+  mediaType: {
+    format: ""
+  }
+};
+
+function lowercaseKeys$1(object) {
+  if (!object) {
+    return {};
+  }
+  return Object.keys(object).reduce((newObj, key) => {
+    newObj[key.toLowerCase()] = object[key];
+    return newObj;
+  }, {});
+}
+
+function isPlainObject$4(value) {
+  if (typeof value !== "object" || value === null)
+    return false;
+  if (Object.prototype.toString.call(value) !== "[object Object]")
+    return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null)
+    return true;
+  const Ctor = Object.prototype.hasOwnProperty.call(proto, "constructor") && proto.constructor;
+  return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
+}
+
+function mergeDeep$1(defaults, options) {
+  const result = Object.assign({}, defaults);
+  Object.keys(options).forEach((key) => {
+    if (isPlainObject$4(options[key])) {
+      if (!(key in defaults))
+        Object.assign(result, { [key]: options[key] });
+      else
+        result[key] = mergeDeep$1(defaults[key], options[key]);
+    } else {
+      Object.assign(result, { [key]: options[key] });
+    }
+  });
+  return result;
+}
+
+function removeUndefinedProperties$1(obj) {
+  for (const key in obj) {
+    if (obj[key] === void 0) {
+      delete obj[key];
+    }
+  }
+  return obj;
+}
+
+function merge$2(defaults, route, options) {
+  if (typeof route === "string") {
+    let [method, url] = route.split(" ");
+    options = Object.assign(url ? { method, url } : { url: method }, options);
+  } else {
+    options = Object.assign({}, route);
+  }
+  options.headers = lowercaseKeys$1(options.headers);
+  removeUndefinedProperties$1(options);
+  removeUndefinedProperties$1(options.headers);
+  const mergedOptions = mergeDeep$1(defaults || {}, options);
+  if (options.url === "/graphql") {
+    if (defaults && defaults.mediaType.previews?.length) {
+      mergedOptions.mediaType.previews = defaults.mediaType.previews.filter(
+        (preview) => !mergedOptions.mediaType.previews.includes(preview)
+      ).concat(mergedOptions.mediaType.previews);
+    }
+    mergedOptions.mediaType.previews = (mergedOptions.mediaType.previews || []).map((preview) => preview.replace(/-preview/, ""));
+  }
+  return mergedOptions;
+}
+
+function addQueryParameters$1(url, parameters) {
+  const separator = /\?/.test(url) ? "&" : "?";
+  const names = Object.keys(parameters);
+  if (names.length === 0) {
+    return url;
+  }
+  return url + separator + names.map((name) => {
+    if (name === "q") {
+      return "q=" + parameters.q.split("+").map(encodeURIComponent).join("+");
+    }
+    return `${name}=${encodeURIComponent(parameters[name])}`;
+  }).join("&");
+}
+
+const urlVariableRegex$1 = /\{[^{}}]+\}/g;
+function removeNonChars$1(variableName) {
+  return variableName.replace(/(?:^\W+)|(?:(?<!\W)\W+$)/g, "").split(/,/);
+}
+function extractUrlVariableNames$1(url) {
+  const matches = url.match(urlVariableRegex$1);
+  if (!matches) {
+    return [];
+  }
+  return matches.map(removeNonChars$1).reduce((a, b) => a.concat(b), []);
+}
+
+function omit$1(object, keysToOmit) {
+  const result = { __proto__: null };
+  for (const key of Object.keys(object)) {
+    if (keysToOmit.indexOf(key) === -1) {
+      result[key] = object[key];
+    }
+  }
+  return result;
+}
+
+function encodeReserved$1(str) {
+  return str.split(/(%[0-9A-Fa-f]{2})/g).map(function(part) {
+    if (!/%[0-9A-Fa-f]/.test(part)) {
+      part = encodeURI(part).replace(/%5B/g, "[").replace(/%5D/g, "]");
+    }
+    return part;
+  }).join("");
+}
+function encodeUnreserved$1(str) {
+  return encodeURIComponent(str).replace(/[!'()*]/g, function(c) {
+    return "%" + c.charCodeAt(0).toString(16).toUpperCase();
+  });
+}
+function encodeValue$1(operator, value, key) {
+  value = operator === "+" || operator === "#" ? encodeReserved$1(value) : encodeUnreserved$1(value);
+  if (key) {
+    return encodeUnreserved$1(key) + "=" + value;
+  } else {
+    return value;
+  }
+}
+function isDefined$1(value) {
+  return value !== void 0 && value !== null;
+}
+function isKeyOperator$1(operator) {
+  return operator === ";" || operator === "&" || operator === "?";
+}
+function getValues$1(context, operator, key, modifier) {
+  var value = context[key], result = [];
+  if (isDefined$1(value) && value !== "") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      value = value.toString();
+      if (modifier && modifier !== "*") {
+        value = value.substring(0, parseInt(modifier, 10));
+      }
+      result.push(
+        encodeValue$1(operator, value, isKeyOperator$1(operator) ? key : "")
+      );
+    } else {
+      if (modifier === "*") {
+        if (Array.isArray(value)) {
+          value.filter(isDefined$1).forEach(function(value2) {
+            result.push(
+              encodeValue$1(operator, value2, isKeyOperator$1(operator) ? key : "")
+            );
+          });
+        } else {
+          Object.keys(value).forEach(function(k) {
+            if (isDefined$1(value[k])) {
+              result.push(encodeValue$1(operator, value[k], k));
+            }
+          });
+        }
+      } else {
+        const tmp = [];
+        if (Array.isArray(value)) {
+          value.filter(isDefined$1).forEach(function(value2) {
+            tmp.push(encodeValue$1(operator, value2));
+          });
+        } else {
+          Object.keys(value).forEach(function(k) {
+            if (isDefined$1(value[k])) {
+              tmp.push(encodeUnreserved$1(k));
+              tmp.push(encodeValue$1(operator, value[k].toString()));
+            }
+          });
+        }
+        if (isKeyOperator$1(operator)) {
+          result.push(encodeUnreserved$1(key) + "=" + tmp.join(","));
+        } else if (tmp.length !== 0) {
+          result.push(tmp.join(","));
+        }
+      }
+    }
+  } else {
+    if (operator === ";") {
+      if (isDefined$1(value)) {
+        result.push(encodeUnreserved$1(key));
+      }
+    } else if (value === "" && (operator === "&" || operator === "?")) {
+      result.push(encodeUnreserved$1(key) + "=");
+    } else if (value === "") {
+      result.push("");
+    }
+  }
+  return result;
+}
+function parseUrl$2(template) {
+  return {
+    expand: expand$1.bind(null, template)
+  };
+}
+function expand$1(template, context) {
+  var operators = ["+", "#", ".", "/", ";", "?", "&"];
+  template = template.replace(
+    /\{([^\{\}]+)\}|([^\{\}]+)/g,
+    function(_, expression, literal) {
+      if (expression) {
+        let operator = "";
+        const values = [];
+        if (operators.indexOf(expression.charAt(0)) !== -1) {
+          operator = expression.charAt(0);
+          expression = expression.substr(1);
+        }
+        expression.split(/,/g).forEach(function(variable) {
+          var tmp = /([^:\*]*)(?::(\d+)|(\*))?/.exec(variable);
+          values.push(getValues$1(context, operator, tmp[1], tmp[2] || tmp[3]));
+        });
+        if (operator && operator !== "+") {
+          var separator = ",";
+          if (operator === "?") {
+            separator = "&";
+          } else if (operator !== "#") {
+            separator = operator;
+          }
+          return (values.length !== 0 ? operator : "") + values.join(separator);
+        } else {
+          return values.join(",");
+        }
+      } else {
+        return encodeReserved$1(literal);
+      }
+    }
+  );
+  if (template === "/") {
+    return template;
+  } else {
+    return template.replace(/\/$/, "");
+  }
+}
+
+function parse$1(options) {
+  let method = options.method.toUpperCase();
+  let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}");
+  let headers = Object.assign({}, options.headers);
+  let body;
+  let parameters = omit$1(options, [
+    "method",
+    "baseUrl",
+    "url",
+    "headers",
+    "request",
+    "mediaType"
+  ]);
+  const urlVariableNames = extractUrlVariableNames$1(url);
+  url = parseUrl$2(url).expand(parameters);
+  if (!/^http/.test(url)) {
+    url = options.baseUrl + url;
+  }
+  const omittedParameters = Object.keys(options).filter((option) => urlVariableNames.includes(option)).concat("baseUrl");
+  const remainingParameters = omit$1(parameters, omittedParameters);
+  const isBinaryRequest = /application\/octet-stream/i.test(headers.accept);
+  if (!isBinaryRequest) {
+    if (options.mediaType.format) {
+      headers.accept = headers.accept.split(/,/).map(
+        (format) => format.replace(
+          /application\/vnd(\.\w+)(\.v3)?(\.\w+)?(\+json)?$/,
+          `application/vnd$1$2.${options.mediaType.format}`
+        )
+      ).join(",");
+    }
+    if (url.endsWith("/graphql")) {
+      if (options.mediaType.previews?.length) {
+        const previewsFromAcceptHeader = headers.accept.match(/(?<![\w-])[\w-]+(?=-preview)/g) || [];
+        headers.accept = previewsFromAcceptHeader.concat(options.mediaType.previews).map((preview) => {
+          const format = options.mediaType.format ? `.${options.mediaType.format}` : "+json";
+          return `application/vnd.github.${preview}-preview${format}`;
+        }).join(",");
+      }
+    }
+  }
+  if (["GET", "HEAD"].includes(method)) {
+    url = addQueryParameters$1(url, remainingParameters);
+  } else {
+    if ("data" in remainingParameters) {
+      body = remainingParameters.data;
+    } else {
+      if (Object.keys(remainingParameters).length) {
+        body = remainingParameters;
+      }
+    }
+  }
+  if (!headers["content-type"] && typeof body !== "undefined") {
+    headers["content-type"] = "application/json; charset=utf-8";
+  }
+  if (["PATCH", "PUT"].includes(method) && typeof body === "undefined") {
+    body = "";
+  }
+  return Object.assign(
+    { method, url, headers },
+    typeof body !== "undefined" ? { body } : null,
+    options.request ? { request: options.request } : null
+  );
+}
+
+function endpointWithDefaults$1(defaults, route, options) {
+  return parse$1(merge$2(defaults, route, options));
+}
+
+function withDefaults$4(oldDefaults, newDefaults) {
+  const DEFAULTS = merge$2(oldDefaults, newDefaults);
+  const endpoint = endpointWithDefaults$1.bind(null, DEFAULTS);
+  return Object.assign(endpoint, {
+    DEFAULTS,
+    defaults: withDefaults$4.bind(null, DEFAULTS),
+    merge: merge$2.bind(null, DEFAULTS),
+    parse: parse$1
+  });
+}
+
+const endpoint$1 = withDefaults$4(null, DEFAULTS$1);
+
+const VERSION$c = "8.4.1";
+
+function isPlainObject$3(value) {
+  if (typeof value !== "object" || value === null)
+    return false;
+  if (Object.prototype.toString.call(value) !== "[object Object]")
+    return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null)
+    return true;
+  const Ctor = Object.prototype.hasOwnProperty.call(proto, "constructor") && proto.constructor;
+  return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
+}
+
+class Deprecation extends Error {
+  constructor(message) {
+    super(message); // Maintains proper stack trace (only available on V8)
+
+    /* istanbul ignore next */
+
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+
+    this.name = 'Deprecation';
+  }
+
+}
+
+var once$1 = {exports: {}};
+
+var wrappy_1;
+var hasRequiredWrappy;
+
+function requireWrappy () {
+	if (hasRequiredWrappy) return wrappy_1;
+	hasRequiredWrappy = 1;
+	// Returns a wrapper function that returns a wrapped callback
+	// The wrapper function should do some stuff, and return a
+	// presumably different callback function.
+	// This makes sure that own properties are retained, so that
+	// decorations and such are not lost along the way.
+	wrappy_1 = wrappy;
+	function wrappy (fn, cb) {
+	  if (fn && cb) return wrappy(fn)(cb)
+
+	  if (typeof fn !== 'function')
+	    throw new TypeError('need wrapper function')
+
+	  Object.keys(fn).forEach(function (k) {
+	    wrapper[k] = fn[k];
+	  });
+
+	  return wrapper
+
+	  function wrapper() {
+	    var args = new Array(arguments.length);
+	    for (var i = 0; i < args.length; i++) {
+	      args[i] = arguments[i];
+	    }
+	    var ret = fn.apply(this, args);
+	    var cb = args[args.length-1];
+	    if (typeof ret === 'function' && ret !== cb) {
+	      Object.keys(cb).forEach(function (k) {
+	        ret[k] = cb[k];
+	      });
+	    }
+	    return ret
+	  }
+	}
+	return wrappy_1;
+}
+
+var hasRequiredOnce;
+
+function requireOnce () {
+	if (hasRequiredOnce) return once$1.exports;
+	hasRequiredOnce = 1;
+	var wrappy = requireWrappy();
+	once$1.exports = wrappy(once);
+	once$1.exports.strict = wrappy(onceStrict);
+
+	once.proto = once(function () {
+	  Object.defineProperty(Function.prototype, 'once', {
+	    value: function () {
+	      return once(this)
+	    },
+	    configurable: true
+	  });
+
+	  Object.defineProperty(Function.prototype, 'onceStrict', {
+	    value: function () {
+	      return onceStrict(this)
+	    },
+	    configurable: true
+	  });
+	});
+
+	function once (fn) {
+	  var f = function () {
+	    if (f.called) return f.value
+	    f.called = true;
+	    return f.value = fn.apply(this, arguments)
+	  };
+	  f.called = false;
+	  return f
+	}
+
+	function onceStrict (fn) {
+	  var f = function () {
+	    if (f.called)
+	      throw new Error(f.onceError)
+	    f.called = true;
+	    return f.value = fn.apply(this, arguments)
+	  };
+	  var name = fn.name || 'Function wrapped with `once`';
+	  f.onceError = name + " shouldn't be called more than once";
+	  f.called = false;
+	  return f
+	}
+	return once$1.exports;
+}
+
+var onceExports = requireOnce();
+var once = /*@__PURE__*/getDefaultExportFromCjs(onceExports);
+
+const logOnceCode$1 = once((deprecation) => console.warn(deprecation));
+const logOnceHeaders$1 = once((deprecation) => console.warn(deprecation));
+let RequestError$3 = class RequestError extends Error {
+  constructor(message, statusCode, options) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+    this.name = "HttpError";
+    this.status = statusCode;
+    let headers;
+    if ("headers" in options && typeof options.headers !== "undefined") {
+      headers = options.headers;
+    }
+    if ("response" in options) {
+      this.response = options.response;
+      headers = options.response.headers;
+    }
+    const requestCopy = Object.assign({}, options.request);
+    if (options.request.headers.authorization) {
+      requestCopy.headers = Object.assign({}, options.request.headers, {
+        authorization: options.request.headers.authorization.replace(
+          /(?<! ) .*$/,
+          " [REDACTED]"
+        )
+      });
+    }
+    requestCopy.url = requestCopy.url.replace(/\bclient_secret=\w+/g, "client_secret=[REDACTED]").replace(/\baccess_token=\w+/g, "access_token=[REDACTED]");
+    this.request = requestCopy;
+    Object.defineProperty(this, "code", {
+      get() {
+        logOnceCode$1(
+          new Deprecation(
+            "[@octokit/request-error] `error.code` is deprecated, use `error.status`."
+          )
+        );
+        return statusCode;
+      }
+    });
+    Object.defineProperty(this, "headers", {
+      get() {
+        logOnceHeaders$1(
+          new Deprecation(
+            "[@octokit/request-error] `error.headers` is deprecated, use `error.response.headers`."
+          )
+        );
+        return headers || {};
+      }
+    });
+  }
+};
+
+function getBufferResponse$1(response) {
+  return response.arrayBuffer();
+}
+
+function fetchWrapper$1(requestOptions) {
+  const log = requestOptions.request && requestOptions.request.log ? requestOptions.request.log : console;
+  const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
+  if (isPlainObject$3(requestOptions.body) || Array.isArray(requestOptions.body)) {
+    requestOptions.body = JSON.stringify(requestOptions.body);
+  }
+  let headers = {};
+  let status;
+  let url;
+  let { fetch } = globalThis;
+  if (requestOptions.request?.fetch) {
+    fetch = requestOptions.request.fetch;
+  }
+  if (!fetch) {
+    throw new Error(
+      "fetch is not set. Please pass a fetch implementation as new Octokit({ request: { fetch }}). Learn more at https://github.com/octokit/octokit.js/#fetch-missing"
+    );
+  }
+  return fetch(requestOptions.url, {
+    method: requestOptions.method,
+    body: requestOptions.body,
+    redirect: requestOptions.request?.redirect,
+    headers: requestOptions.headers,
+    signal: requestOptions.request?.signal,
+    // duplex must be set if request.body is ReadableStream or Async Iterables.
+    // See https://fetch.spec.whatwg.org/#dom-requestinit-duplex.
+    ...requestOptions.body && { duplex: "half" }
+  }).then(async (response) => {
+    url = response.url;
+    status = response.status;
+    for (const keyAndValue of response.headers) {
+      headers[keyAndValue[0]] = keyAndValue[1];
+    }
+    if ("deprecation" in headers) {
+      const matches = headers.link && headers.link.match(/<([^<>]+)>; rel="deprecation"/);
+      const deprecationLink = matches && matches.pop();
+      log.warn(
+        `[@octokit/request] "${requestOptions.method} ${requestOptions.url}" is deprecated. It is scheduled to be removed on ${headers.sunset}${deprecationLink ? `. See ${deprecationLink}` : ""}`
+      );
+    }
+    if (status === 204 || status === 205) {
+      return;
+    }
+    if (requestOptions.method === "HEAD") {
+      if (status < 400) {
+        return;
+      }
+      throw new RequestError$3(response.statusText, status, {
+        response: {
+          url,
+          status,
+          headers,
+          data: void 0
+        },
+        request: requestOptions
+      });
+    }
+    if (status === 304) {
+      throw new RequestError$3("Not modified", status, {
+        response: {
+          url,
+          status,
+          headers,
+          data: await getResponseData$1(response)
+        },
+        request: requestOptions
+      });
+    }
+    if (status >= 400) {
+      const data = await getResponseData$1(response);
+      const error = new RequestError$3(toErrorMessage$1(data), status, {
+        response: {
+          url,
+          status,
+          headers,
+          data
+        },
+        request: requestOptions
+      });
+      throw error;
+    }
+    return parseSuccessResponseBody ? await getResponseData$1(response) : response.body;
+  }).then((data) => {
+    return {
+      status,
+      url,
+      headers,
+      data
+    };
+  }).catch((error) => {
+    if (error instanceof RequestError$3)
+      throw error;
+    else if (error.name === "AbortError")
+      throw error;
+    let message = error.message;
+    if (error.name === "TypeError" && "cause" in error) {
+      if (error.cause instanceof Error) {
+        message = error.cause.message;
+      } else if (typeof error.cause === "string") {
+        message = error.cause;
+      }
+    }
+    throw new RequestError$3(message, 500, {
+      request: requestOptions
+    });
+  });
+}
+async function getResponseData$1(response) {
+  const contentType = response.headers.get("content-type");
+  if (/application\/json/.test(contentType)) {
+    return response.json().catch(() => response.text()).catch(() => "");
+  }
+  if (!contentType || /^text\/|charset=utf-8$/.test(contentType)) {
+    return response.text();
+  }
+  return getBufferResponse$1(response);
+}
+function toErrorMessage$1(data) {
+  if (typeof data === "string")
+    return data;
+  let suffix;
+  if ("documentation_url" in data) {
+    suffix = ` - ${data.documentation_url}`;
+  } else {
+    suffix = "";
+  }
+  if ("message" in data) {
+    if (Array.isArray(data.errors)) {
+      return `${data.message}: ${data.errors.map(JSON.stringify).join(", ")}${suffix}`;
+    }
+    return `${data.message}${suffix}`;
+  }
+  return `Unknown error: ${JSON.stringify(data)}`;
+}
+
+function withDefaults$3(oldEndpoint, newDefaults) {
+  const endpoint = oldEndpoint.defaults(newDefaults);
+  const newApi = function(route, parameters) {
+    const endpointOptions = endpoint.merge(route, parameters);
+    if (!endpointOptions.request || !endpointOptions.request.hook) {
+      return fetchWrapper$1(endpoint.parse(endpointOptions));
+    }
+    const request = (route2, parameters2) => {
+      return fetchWrapper$1(
+        endpoint.parse(endpoint.merge(route2, parameters2))
+      );
+    };
+    Object.assign(request, {
+      endpoint,
+      defaults: withDefaults$3.bind(null, endpoint)
+    });
+    return endpointOptions.request.hook(request, endpointOptions);
+  };
+  return Object.assign(newApi, {
+    endpoint,
+    defaults: withDefaults$3.bind(null, endpoint)
+  });
+}
+
+const request$1 = withDefaults$3(endpoint$1, {
+  headers: {
+    "user-agent": `octokit-request.js/${VERSION$c} ${getUserAgent()}`
+  }
+});
+
 const VERSION$b = "9.0.6";
 
 const userAgent = `octokit-endpoint.js/${VERSION$b} ${getUserAgent()}`;
@@ -121156,118 +122567,6 @@ function isPlainObject$1(value) {
   const Ctor = Object.prototype.hasOwnProperty.call(proto, "constructor") && proto.constructor;
   return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
 }
-
-class Deprecation extends Error {
-  constructor(message) {
-    super(message); // Maintains proper stack trace (only available on V8)
-
-    /* istanbul ignore next */
-
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, this.constructor);
-    }
-
-    this.name = 'Deprecation';
-  }
-
-}
-
-var once$1 = {exports: {}};
-
-var wrappy_1;
-var hasRequiredWrappy;
-
-function requireWrappy () {
-	if (hasRequiredWrappy) return wrappy_1;
-	hasRequiredWrappy = 1;
-	// Returns a wrapper function that returns a wrapped callback
-	// The wrapper function should do some stuff, and return a
-	// presumably different callback function.
-	// This makes sure that own properties are retained, so that
-	// decorations and such are not lost along the way.
-	wrappy_1 = wrappy;
-	function wrappy (fn, cb) {
-	  if (fn && cb) return wrappy(fn)(cb)
-
-	  if (typeof fn !== 'function')
-	    throw new TypeError('need wrapper function')
-
-	  Object.keys(fn).forEach(function (k) {
-	    wrapper[k] = fn[k];
-	  });
-
-	  return wrapper
-
-	  function wrapper() {
-	    var args = new Array(arguments.length);
-	    for (var i = 0; i < args.length; i++) {
-	      args[i] = arguments[i];
-	    }
-	    var ret = fn.apply(this, args);
-	    var cb = args[args.length-1];
-	    if (typeof ret === 'function' && ret !== cb) {
-	      Object.keys(cb).forEach(function (k) {
-	        ret[k] = cb[k];
-	      });
-	    }
-	    return ret
-	  }
-	}
-	return wrappy_1;
-}
-
-var hasRequiredOnce;
-
-function requireOnce () {
-	if (hasRequiredOnce) return once$1.exports;
-	hasRequiredOnce = 1;
-	var wrappy = requireWrappy();
-	once$1.exports = wrappy(once);
-	once$1.exports.strict = wrappy(onceStrict);
-
-	once.proto = once(function () {
-	  Object.defineProperty(Function.prototype, 'once', {
-	    value: function () {
-	      return once(this)
-	    },
-	    configurable: true
-	  });
-
-	  Object.defineProperty(Function.prototype, 'onceStrict', {
-	    value: function () {
-	      return onceStrict(this)
-	    },
-	    configurable: true
-	  });
-	});
-
-	function once (fn) {
-	  var f = function () {
-	    if (f.called) return f.value
-	    f.called = true;
-	    return f.value = fn.apply(this, arguments)
-	  };
-	  f.called = false;
-	  return f
-	}
-
-	function onceStrict (fn) {
-	  var f = function () {
-	    if (f.called)
-	      throw new Error(f.onceError)
-	    f.called = true;
-	    return f.value = fn.apply(this, arguments)
-	  };
-	  var name = fn.name || 'Function wrapped with `once`';
-	  f.onceError = name + " shouldn't be called more than once";
-	  f.called = false;
-	  return f
-	}
-	return once$1.exports;
-}
-
-var onceExports = requireOnce();
-var once = /*@__PURE__*/getDefaultExportFromCjs(onceExports);
 
 const logOnceCode = once((deprecation) => console.warn(deprecation));
 const logOnceHeaders = once((deprecation) => console.warn(deprecation));
@@ -121710,7 +123009,7 @@ var Octokit = class {
   constructor(options = {}) {
     const hook = new beforeAfterHookExports.Collection();
     const requestDefaults = {
-      baseUrl: request.endpoint.DEFAULTS.baseUrl,
+      baseUrl: request$1.endpoint.DEFAULTS.baseUrl,
       headers: {},
       request: Object.assign({}, options.request, {
         // @ts-ignore internal usage only, no need to type
@@ -121731,7 +123030,7 @@ var Octokit = class {
     if (options.timeZone) {
       requestDefaults.headers["time-zone"] = options.timeZone;
     }
-    this.request = request.defaults(requestDefaults);
+    this.request = request$1.defaults(requestDefaults);
     this.graphql = withCustomRequest(this.request).defaults(requestDefaults);
     this.log = Object.assign(
       {
@@ -124718,7 +126017,7 @@ function requireChainsaw () {
 	if (hasRequiredChainsaw) return chainsaw;
 	hasRequiredChainsaw = 1;
 	var Traverse = requireTraverse();
-	var EventEmitter = require$$1.EventEmitter;
+	var EventEmitter = require$$1$1.EventEmitter;
 
 	chainsaw = Chainsaw;
 	function Chainsaw (builder) {
@@ -125182,7 +126481,7 @@ function requireBinary () {
 	hasRequiredBinary = 1;
 	(function (module, exports) {
 		var Chainsaw = requireChainsaw();
-		var EventEmitter = require$$1.EventEmitter;
+		var EventEmitter = require$$1$1.EventEmitter;
 		var Buffers = requireBuffers();
 		var Vars = requireVars();
 		var Stream = stream__default.Stream;
@@ -126828,7 +128127,7 @@ function streamExtractExternal(url_1, directory_1) {
         if (rawName) {
             // Sanitize fileName to prevent path traversal attacks
             // Use path.basename to extract only the filename component
-            fileName = path$1.basename(decodeURIComponent(rawName.trim()));
+            fileName = path.basename(decodeURIComponent(rawName.trim()));
         }
         debug(`Content-Type: ${contentType}, mimeType: ${mimeType}, urlEndsWithZip: ${urlEndsWithZip}, isZip: ${isZip}, skipDecompress: ${skipDecompress}`);
         debug(`Content-Disposition: ${contentDisposition}, fileName: ${fileName}`);
@@ -126845,7 +128144,7 @@ function streamExtractExternal(url_1, directory_1) {
                 clearTimeout(timer);
                 reject(error);
             };
-            const hashStream = crypto$1.createHash('sha256').setEncoding('hex');
+            const hashStream = crypto.createHash('sha256').setEncoding('hex');
             const passThrough = new stream$2.PassThrough()
                 .on('data', () => {
                 timer.refresh();
@@ -126871,7 +128170,7 @@ function streamExtractExternal(url_1, directory_1) {
             }
             else {
                 // Save raw file without extracting
-                const filePath = path$1.join(directory, fileName);
+                const filePath = path.join(directory, fileName);
                 const writeStream = fs.createWriteStream(filePath);
                 info(`Downloading raw file (non-zip) to: ${filePath}`);
                 passThrough.pipe(writeStream).on('close', onClose).on('error', onError);
@@ -129741,7 +131040,7 @@ function requireLib () {
 	Object.defineProperty(lib, "__esModule", { value: true });
 	lib.HttpClient = lib.isHttps = lib.HttpClientResponse = lib.HttpClientError = lib.getProxyUrl = lib.MediaTypes = lib.Headers = lib.HttpCodes = void 0;
 	const http = __importStar(http__default);
-	const https = __importStar(https__default);
+	const https = __importStar(require$$1__default);
 	const pm = __importStar(requireProxy());
 	const tunnel = __importStar(requireTunnel());
 	const undici_1 = requireUndici();
@@ -131442,7 +132741,7 @@ function requireToolrunner () {
 	Object.defineProperty(toolrunner, "__esModule", { value: true });
 	toolrunner.argStringToArray = toolrunner.ToolRunner = void 0;
 	const os = __importStar(os__default);
-	const events = __importStar(require$$1);
+	const events = __importStar(require$$1$1);
 	const child$1 = __importStar(child);
 	const path = __importStar(path__default);
 	const io = __importStar(requireIo());
@@ -135494,7 +136793,7 @@ function replaceVersionEscape(purl) {
     return purl;
 }
 
-var version = "1.14.0";
+var version = "1.14.1";
 var pkg = {
 	version: version};
 
@@ -150014,7 +151313,7 @@ function requireForm_data () {
 	var util = require$$0__default;
 	var path = path__default;
 	var http = http__default;
-	var https = https__default;
+	var https = require$$1__default;
 	var parseUrl = require$$5$1.parse;
 	var fs = fs__default;
 	var Stream = stream__default.Stream;
@@ -151659,7 +152958,7 @@ function requireSrc () {
 	var __importDefault = (src && src.__importDefault) || function (mod) {
 	    return (mod && mod.__esModule) ? mod : { "default": mod };
 	};
-	const events_1 = require$$1;
+	const events_1 = require$$1$1;
 	const debug_1 = __importDefault(requireSrc$1());
 	const promisify_1 = __importDefault(requirePromisify());
 	const debug = debug_1.default('agent-base');
@@ -151955,7 +153254,7 @@ function requireAgent () {
 	};
 	Object.defineProperty(agent, "__esModule", { value: true });
 	const net_1 = __importDefault(require$$0$4);
-	const tls_1 = __importDefault(require$$1$1);
+	const tls_1 = __importDefault(require$$1$2);
 	const url_1 = __importDefault(require$$5$1);
 	const assert_1 = __importDefault(require$$5);
 	const debug_1 = __importDefault(requireSrc$1());
@@ -152179,7 +153478,7 @@ function requireFollowRedirects () {
 	var url = require$$5$1;
 	var URL = url.URL;
 	var http = http__default;
-	var https = https__default;
+	var https = require$$1__default;
 	var Writable = stream__default.Writable;
 	var assert = require$$5;
 	var debug = requireDebug();
@@ -154715,7 +156014,7 @@ var httpAdapter = isHttpAdapterSupported &&
         if (configTransport) {
           transport = configTransport;
         } else if (maxRedirects === 0) {
-          transport = isHttpsRequest ? https__default : http__default;
+          transport = isHttpsRequest ? require$$1__default : http__default;
           isNativeTransport = true;
         } else {
           transportEnforcesMaxBodyLength = true;
@@ -157371,10 +158670,37 @@ const {
  *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
  *  "Sonatype" is a trademark of Sonatype, Inc.
  */
+// proxy is host[:port] (no scheme) and proxyUser is username:password, matching the format
+// already used for the IQ CLI's own --proxy/--proxy-user flags (see cli-command-builder.ts).
+function getProxyAgents(proxy, proxyUser) {
+    if (!proxy) {
+        return undefined;
+    }
+    const proxyUrl = new URL(`http://${proxy}`);
+    if (proxyUser) {
+        const [user, pass] = proxyUser.split(':');
+        proxyUrl.username = encodeURIComponent(user ?? '');
+        proxyUrl.password = encodeURIComponent(pass ?? '');
+    }
+    const urlString = proxyUrl.toString();
+    return {
+        httpAgent: new distExports$1.HttpProxyAgent(urlString),
+        httpsAgent: new distExports$2.HttpsProxyAgent(urlString),
+        proxy: false
+    };
+}
+
+/*
+ *  Copyright (c) 2023-present Sonatype, Inc. All rights reserved.
+ *  Includes the third-party code listed at https://links.sonatype.com/products/clm/attributions.
+ *  "Sonatype" is a trademark of Sonatype, Inc.
+ */
 class IqClientBuilder {
     iqServerUrl;
     username;
     password;
+    proxy;
+    proxyUser;
     withUrl(iqServerUrl) {
         this.iqServerUrl = iqServerUrl;
         return this;
@@ -157387,24 +158713,36 @@ class IqClientBuilder {
         this.password = password;
         return this;
     }
+    withProxy(proxy) {
+        this.proxy = proxy;
+        return this;
+    }
+    withProxyUser(proxyUser) {
+        this.proxyUser = proxyUser;
+        return this;
+    }
     build() {
         if (!this.iqServerUrl || !this.username || !this.password) {
             throw new Error('IqClientBuilder: Missing required parameters');
         }
-        return new IqClient(this.iqServerUrl, this.username, this.password);
+        return new IqClient(this.iqServerUrl, this.username, this.password, this.proxy, this.proxyUser);
     }
 }
 class IqClient {
     iqServerUrl;
     username;
     password;
-    constructor(serverUrl, username, password) {
+    proxy;
+    proxyUser;
+    constructor(serverUrl, username, password, proxy, proxyUser) {
         this.iqServerUrl = serverUrl;
         if (this.iqServerUrl.endsWith('/')) {
             this.iqServerUrl = this.iqServerUrl.substring(0, this.iqServerUrl.length - 1);
         }
         this.username = username;
         this.password = password;
+        this.proxy = proxy;
+        this.proxyUser = proxyUser;
     }
     async fetchVulnerabilityDetails(vulnerabilityId) {
         debug(`Fetching vulnerability details for: ${vulnerabilityId}`);
@@ -157425,9 +158763,10 @@ class IqClient {
         debug(`Fetching application internal ID for application ID: ${applicationPublicId}`);
         const url = `${this.iqServerUrl}/api/v2/applications?publicId=${applicationPublicId}`;
         const appResponse = await axios.get(url, await this.getAxiosConfig(this.username, this.password));
-        const applicationInternalId = appResponse?.data?.applications[0]?.id;
+        const applicationInternalId = appResponse?.data?.applications?.[0]?.id;
         if (!applicationInternalId) {
-            throw new Error(`Failed to fetch the application internal ID for the public ID: ${applicationPublicId}, does not exist.`);
+            throw new Error(`No application was returned for the public ID: ${applicationPublicId}. ` +
+                `Ensure the application exists and that the IQ Server user has the 'View IQ Elements' permission for it.`);
         }
         return applicationInternalId;
     }
@@ -157500,6 +158839,12 @@ class IqClient {
         if (username && password) {
             config.auth = { username, password };
         }
+        const proxyAgents = getProxyAgents(this.proxy, this.proxyUser);
+        if (proxyAgents) {
+            config.httpAgent = proxyAgents.httpAgent;
+            config.httpsAgent = proxyAgents.httpsAgent;
+            config.proxy = proxyAgents.proxy;
+        }
         return config;
     }
     getHeaders() {
@@ -157542,6 +158887,8 @@ async function run() {
             .withUrl(parameters.iqServerUrl)
             .withUsername(parameters.username)
             .withPassword(parameters.password)
+            .withProxy(parameters.proxy)
+            .withProxyUser(parameters.proxyUser)
             .build();
         await iqClient.sendUserInteractionsTelemetry('fetch-sbom', data);
         const applicationInternalId = await iqClient.fetchInternalAppId(parameters.applicationId);
