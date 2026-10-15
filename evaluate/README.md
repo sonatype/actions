@@ -165,8 +165,10 @@ jobs:
 > Ignore reachability analysis errors (reachability analysis failed to run). Default: `false`. `Optional`
 
 > **skip-java-setup**\
-> Skip the automatic Java setup step. Use this when Java is already available in the runner environment or when you need
-> to provide Java through your own approved mechanism. Default: `false`. `Optional`
+> Skip the automatic Java setup step. Enabled by default because current GitHub Actions runners already ship a
+> compatible Java (JDK 21 on Ubuntu 24.04, JDK 25 on Ubuntu 26.04). Set to `false` to have the action provision Java
+> itself, e.g. on runners that do not include a compatible Java or when you need to pin a specific version. Default:
+> `true`. `Optional`
 
 ## Output
 

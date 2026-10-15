@@ -38715,7 +38715,7 @@ function getAndValidateInputs() {
         throw new Error(`Invalid SBOM standard: ${sbomStandard}. Valid options are SPDX or CycloneDX.`);
     }
     if (sbomVersion) {
-        const supportedCycloneDxVersions = ['1.2', '1.3', '1.4', '1.5', '1.6'];
+        const supportedCycloneDxVersions = ['1.2', '1.3', '1.4', '1.5', '1.6', '1.7'];
         if (sbomStandard.toLowerCase() === CYCLONEDX_FORMAT && !supportedCycloneDxVersions.includes(sbomVersion)) {
             throw new Error(`Supported versions for CycloneDX is: ${supportedCycloneDxVersions}`);
         }
